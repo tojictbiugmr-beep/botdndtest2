@@ -84,7 +84,7 @@ def build_context(world: dict) -> str:
     cls = CLASSES.get(c.get("cls"), {})
     lines.append(
         f"ИГРОК: {c.get('name','?')} — {cls.get('name','')}. "
-        f"Характер: {c.get('personality','')}. "
+        f"Описание: {c.get('personality','')}. "
         f"HP {c.get('hp',0)}/{c.get('hp_max',0)}, золото {c.get('gold',0)}, "
         f"состояние: {c.get('state','')}"
     )
