@@ -111,6 +111,11 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
         return
 
     data = await state.get_data()
+    if not data.get("setting") or not data.get("name") or not data.get("personality"):
+        await cb.answer("Сессия создания истекла. Напиши /start", show_alert=True)
+        await state.clear()
+        return
+
     await state.clear()
 
     world = new_world(cb.from_user.id)
@@ -121,7 +126,10 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
 
     storage.save(cb.from_user.id, world)
     cls = CLASSES[cls_key]
-    await cb.message.edit_reply_markup(reply_markup=None)
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
     await cb.message.answer(
         f"Класс: {cls['name']}.\n{cls['desc']}\n\n"
         f"Мир создан. {data['name']} входит в историю."
@@ -173,7 +181,6 @@ async def cb_attack(cb: CallbackQuery):
         pass
 
     if C.combat_over(world):
-        # конец боя
         if world["character"]["hp"] <= 0:
             text += "\n\n☠️ Ты повержен. Напиши /start, чтобы начать заново."
             C.end_combat(world)
@@ -183,7 +190,6 @@ async def cb_attack(cb: CallbackQuery):
             summary = C.end_combat(world)
             text += f"\n\n✅ {summary}"
             storage.save(cb.from_user.id, world)
-            # возвращаем ход мастеру
             try:
                 result = await engine.process_action(
                     world, "[бой окончен, продолжаю]"
@@ -208,7 +214,6 @@ async def handle(m: Message):
         await m.answer("Начни с /start")
         return
 
-    # В бою — только кнопка
     if (world.get("combat") or {}).get("active"):
         await m.answer("Ты в бою. Используй кнопку ⚔️ Атака.", reply_markup=COMBAT_KB)
         return
