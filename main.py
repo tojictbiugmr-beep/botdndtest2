@@ -14,8 +14,9 @@ from aiogram.types import (
 from config import BOT_TOKEN
 import storage
 import engine
+import combat as C
 from memory import new_world
-from character import new_character
+from character import new_character, CLASSES
 
 logging.basicConfig(level=logging.INFO)
 
@@ -33,6 +34,17 @@ class Setup(StatesGroup):
 CONTINUE_KB = InlineKeyboardMarkup(inline_keyboard=[[
     InlineKeyboardButton(text="▶️ Продолжить", callback_data="continue"),
     InlineKeyboardButton(text="🔄 Новая игра", callback_data="restart"),
+]])
+
+CLASS_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="⚔️ Воин", callback_data="class_warrior"),
+     InlineKeyboardButton(text="🔮 Маг", callback_data="class_mage")],
+    [InlineKeyboardButton(text="🗡 Плут", callback_data="class_rogue"),
+     InlineKeyboardButton(text="✨ Жрец", callback_data="class_cleric")],
+])
+
+COMBAT_KB = InlineKeyboardMarkup(inline_keyboard=[[
+    InlineKeyboardButton(text="⚔️ Атака", callback_data="combat_attack"),
 ]])
 
 
@@ -53,7 +65,6 @@ async def cmd_start(m: Message, state: FSMContext):
     if existing and existing["character"]:
         await m.answer("У тебя есть сохранённая партия.", reply_markup=CONTINUE_KB)
         return
-
     await m.answer("Новая игра.\n\nОпиши **сеттинг** мира (эпоха, жанр, атмосфера):")
     await state.set_state(Setup.setting)
 
@@ -88,50 +99,120 @@ async def setup_name(m: Message, state: FSMContext):
 
 @dp.message(Setup.personality, F.text)
 async def setup_personality(m: Message, state: FSMContext):
+    await state.update_data(personality=m.text.strip())
+    await m.answer("Выбери **класс**:", reply_markup=CLASS_KB)
+
+
+@dp.callback_query(F.data.startswith("class_"))
+async def cb_class(cb: CallbackQuery, state: FSMContext):
+    cls_key = cb.data.replace("class_", "")
+    if cls_key not in CLASSES:
+        await cb.answer("Нет такого класса.", show_alert=True)
+        return
+
     data = await state.get_data()
     await state.clear()
 
-    world = new_world(m.from_user.id)
+    world = new_world(cb.from_user.id)
     world["world"]["setting"] = data["setting"]
     world["world"]["tone"] = "тёмное фэнтези"
     world["world"]["milestone"] = "Пролог"
-    world["character"] = new_character(data["name"], m.text.strip())
+    world["character"] = new_character(data["name"], data["personality"], cls_key)
 
-    storage.save(m.from_user.id, world)
-    await m.answer(
-        f"Мир создан. {data['name']} входит в историю.\n"
-        f"Опиши первое действие или попроси мастера начать сцену."
+    storage.save(cb.from_user.id, world)
+    cls = CLASSES[cls_key]
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer(
+        f"Класс: {cls['name']}.\n{cls['desc']}\n\n"
+        f"Мир создан. {data['name']} входит в историю."
     )
+    await cb.answer()
 
 
-# ---------- Бросок кубика (только когда ждёт проверка) ----------
+# ---------- Бросок кубика ----------
 @dp.callback_query(F.data == "roll")
 async def cb_roll(cb: CallbackQuery):
     world = storage.load(cb.from_user.id)
     if not world or not world.get("pending"):
         await cb.answer("Бросать нечего.", show_alert=True)
         return
-
     result = engine.resolve_check(world, {})
     storage.save(cb.from_user.id, world)
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await cb.message.answer(result["text"])
+    await cb.answer()
 
-    # убираем кнопку с исходного сообщения
+
+# ---------- Боевые кнопки ----------
+@dp.callback_query(F.data == "combat_attack")
+async def cb_attack(cb: CallbackQuery):
+    world = storage.load(cb.from_user.id)
+    if not world or not (world.get("combat") or {}).get("active"):
+        await cb.answer("Ты не в бою.", show_alert=True)
+        return
+
+    lines = [C.player_attack(world)]
+
+    if not C.combat_over(world):
+        enemy_log = C.enemy_turn(world)
+        if enemy_log:
+            lines.append(enemy_log)
+
+    storage.save(cb.from_user.id, world)
+    text = "\n\n".join(lines)
+    status = C.status_line(world)
+    if status:
+        text += f"\n\n{status}"
+
     try:
         await cb.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
 
-    await cb.message.answer(result["text"])
+    if C.combat_over(world):
+        # конец боя
+        if world["character"]["hp"] <= 0:
+            text += "\n\n☠️ Ты повержен. Напиши /start, чтобы начать заново."
+            C.end_combat(world)
+            storage.save(cb.from_user.id, world)
+            await cb.message.answer(text)
+        else:
+            summary = C.end_combat(world)
+            text += f"\n\n✅ {summary}"
+            storage.save(cb.from_user.id, world)
+            # возвращаем ход мастеру
+            try:
+                result = await engine.process_action(
+                    world, "[бой окончен, продолжаю]"
+                )
+                text += f"\n\n{result['text']}"
+                storage.save(cb.from_user.id, world)
+            except Exception as e:
+                logging.exception("LLM after combat")
+                text += f"\n\n(мастер промолчал: {e})"
+            await cb.message.answer(text)
+    else:
+        await cb.message.answer(text, reply_markup=COMBAT_KB)
+
     await cb.answer()
 
 
-# ---------- Основной игровой цикл ----------
+# ---------- Основной цикл ----------
 @dp.message(F.text & ~F.text.startswith("/"))
 async def handle(m: Message):
     world = storage.load(m.from_user.id)
     if not world or not world.get("character"):
         await m.answer("Начни с /start")
         return
+
+    # В бою — только кнопка
+    if (world.get("combat") or {}).get("active"):
+        await m.answer("Ты в бою. Используй кнопку ⚔️ Атака.", reply_markup=COMBAT_KB)
+        return
+
     if world.get("pending"):
         await m.answer("Сначала брось кубик ☝️")
         return
@@ -152,6 +233,12 @@ async def handle(m: Message):
         await m.answer(
             result["text"],
             reply_markup=roll_kb(c.get("stat", "DEX"), int(c.get("difficulty", 12))),
+        )
+    elif result["type"] == "combat":
+        status = C.status_line(world)
+        await m.answer(
+            f"{result['text']}\n\n{status}\n\nХод твой — жми ⚔️ Атака.",
+            reply_markup=COMBAT_KB,
         )
     else:
         await m.answer(result["text"])
