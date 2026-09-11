@@ -29,17 +29,29 @@ class Setup(StatesGroup):
     personality = State()
 
 
+# ---------- Клавиатуры ----------
+CONTINUE_KB = InlineKeyboardMarkup(inline_keyboard=[[
+    InlineKeyboardButton(text="▶️ Продолжить", callback_data="continue"),
+    InlineKeyboardButton(text="🔄 Новая игра", callback_data="restart"),
+]])
+
+
+def roll_kb(stat: str, difficulty: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text=f"🎲 Бросок {stat} (сл. {difficulty})",
+            callback_data="roll",
+        )
+    ]])
+
+
 # ---------- /start ----------
 @dp.message(Command("start"))
 async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
     existing = storage.load(m.from_user.id)
     if existing and existing["character"]:
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="▶️ Продолжить", callback_data="continue"),
-            InlineKeyboardButton(text="🔄 Новая игра", callback_data="restart"),
-        ]])
-        await m.answer("У тебя есть сохранённая партия.", reply_markup=kb)
+        await m.answer("У тебя есть сохранённая партия.", reply_markup=CONTINUE_KB)
         return
 
     await m.answer("Новая игра.\n\nОпиши **сеттинг** мира (эпоха, жанр, атмосфера):")
@@ -81,7 +93,7 @@ async def setup_personality(m: Message, state: FSMContext):
 
     world = new_world(m.from_user.id)
     world["world"]["setting"] = data["setting"]
-    world["world"]["tone"] = "тёмное фэнтези"  # можно тоже спросить
+    world["world"]["tone"] = "тёмное фэнтези"
     world["world"]["milestone"] = "Пролог"
     world["character"] = new_character(data["name"], m.text.strip())
 
@@ -92,7 +104,7 @@ async def setup_personality(m: Message, state: FSMContext):
     )
 
 
-# ---------- Бросок кубика ----------
+# ---------- Бросок кубика (только когда ждёт проверка) ----------
 @dp.callback_query(F.data == "roll")
 async def cb_roll(cb: CallbackQuery):
     world = storage.load(cb.from_user.id)
@@ -103,7 +115,12 @@ async def cb_roll(cb: CallbackQuery):
     result = engine.resolve_check(world, {})
     storage.save(cb.from_user.id, world)
 
-    await cb.message.edit_reply_markup(reply_markup=None)
+    # убираем кнопку с исходного сообщения
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
     await cb.message.answer(result["text"])
     await cb.answer()
 
@@ -132,13 +149,10 @@ async def handle(m: Message):
 
     if result["type"] == "check":
         c = result["check"]
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(
-                text=f"🎲 {c.get('stat','DEX')} (сл. {c.get('difficulty',12)})",
-                callback_data="roll"
-            )
-        ]])
-        await m.answer(result["text"], reply_markup=kb)
+        await m.answer(
+            result["text"],
+            reply_markup=roll_kb(c.get("stat", "DEX"), int(c.get("difficulty", 12))),
+        )
     else:
         await m.answer(result["text"])
 
