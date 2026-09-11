@@ -45,6 +45,7 @@ CLASS_KB = InlineKeyboardMarkup(inline_keyboard=[
 
 COMBAT_KB = InlineKeyboardMarkup(inline_keyboard=[[
     InlineKeyboardButton(text="⚔️ Атака", callback_data="combat_attack"),
+    InlineKeyboardButton(text="🏳 Сдаться", callback_data="combat_flee"),
 ]])
 
 
@@ -62,7 +63,7 @@ def roll_kb(stat: str, difficulty: int) -> InlineKeyboardMarkup:
 async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
     existing = storage.load(m.from_user.id)
-    if existing and existing["character"]:
+    if existing and existing.get("character"):
         await m.answer("У тебя есть сохранённая партия.", reply_markup=CONTINUE_KB)
         return
     await m.answer("Новая игра.\n\nОпиши **сеттинг** мира (эпоха, жанр, атмосфера):")
@@ -140,9 +141,10 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
 # ---------- Бросок кубика ----------
 @dp.callback_query(F.data == "roll")
 async def cb_roll(cb: CallbackQuery):
+    await cb.answer()
     world = storage.load(cb.from_user.id)
     if not world or not world.get("pending"):
-        await cb.answer("Бросать нечего.", show_alert=True)
+        await cb.message.answer("Бросать нечего.")
         return
     result = engine.resolve_check(world, {})
     storage.save(cb.from_user.id, world)
@@ -151,23 +153,30 @@ async def cb_roll(cb: CallbackQuery):
     except Exception:
         pass
     await cb.message.answer(result["text"])
-    await cb.answer()
 
 
-# ---------- Боевые кнопки ----------
+# ---------- Бой: атака ----------
 @dp.callback_query(F.data == "combat_attack")
 async def cb_attack(cb: CallbackQuery):
+    await cb.answer()
+
     world = storage.load(cb.from_user.id)
     if not world or not (world.get("combat") or {}).get("active"):
-        await cb.answer("Ты не в бою.", show_alert=True)
+        await cb.message.answer("Ты не в бою.")
         return
 
-    lines = [C.player_attack(world)]
-
-    if not C.combat_over(world):
-        enemy_log = C.enemy_turn(world)
-        if enemy_log:
-            lines.append(enemy_log)
+    try:
+        lines = [C.player_attack(world)]
+        if not C.combat_over(world):
+            enemy_log = C.enemy_turn(world)
+            if enemy_log:
+                lines.append(enemy_log)
+    except Exception as e:
+        logging.exception("combat error")
+        world["combat"] = {"active": False, "enemies": [], "log": []}
+        storage.save(cb.from_user.id, world)
+        await cb.message.answer(f"⚠️ Ошибка боя: {e}")
+        return
 
     storage.save(cb.from_user.id, world)
     text = "\n\n".join(lines)
@@ -186,24 +195,59 @@ async def cb_attack(cb: CallbackQuery):
             C.end_combat(world)
             storage.save(cb.from_user.id, world)
             await cb.message.answer(text)
-        else:
-            summary = C.end_combat(world)
-            text += f"\n\n✅ {summary}"
-            storage.save(cb.from_user.id, world)
-            try:
-                result = await engine.process_action(
-                    world, "[бой окончен, продолжаю]"
-                )
-                text += f"\n\n{result['text']}"
-                storage.save(cb.from_user.id, world)
-            except Exception as e:
-                logging.exception("LLM after combat")
-                text += f"\n\n(мастер промолчал: {e})"
-            await cb.message.answer(text)
-    else:
-        await cb.message.answer(text, reply_markup=COMBAT_KB)
+            return
 
+        summary = C.end_combat(world)
+        text += f"\n\n✅ {summary}"
+        storage.save(cb.from_user.id, world)
+        await cb.message.answer(text)
+
+        await bot.send_chat_action(cb.message.chat.id, "typing")
+        try:
+            result = await engine.process_action(world, "[бой окончен, продолжаю]")
+            storage.save(cb.from_user.id, world)
+            await cb.message.answer(result["text"])
+        except Exception as e:
+            logging.exception("LLM after combat")
+            await cb.message.answer(f"(мастер промолчал: {e})")
+        return
+
+    await cb.message.answer(text, reply_markup=COMBAT_KB)
+
+
+# ---------- Бой: сдаться ----------
+@dp.callback_query(F.data == "combat_flee")
+async def cb_flee(cb: CallbackQuery):
     await cb.answer()
+
+    world = storage.load(cb.from_user.id)
+    if not world or not (world.get("combat") or {}).get("active"):
+        await cb.message.answer("Ты не в бою.")
+        return
+
+    C.end_combat(world)
+    storage.save(cb.from_user.id, world)
+
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    await cb.message.answer(
+        "🏳 Ты отступаешь. Бой прерван. Опиши, куда бежишь — или что делаешь дальше."
+    )
+
+
+# ---------- Команда /flee (страховка) ----------
+@dp.message(Command("flee"))
+async def cmd_flee(m: Message):
+    world = storage.load(m.from_user.id)
+    if not world or not (world.get("combat") or {}).get("active"):
+        await m.answer("Ты не в бою.")
+        return
+    C.end_combat(world)
+    storage.save(m.from_user.id, world)
+    await m.answer("🏳 Ты выходишь из боя. Опиши, что делаешь дальше.")
 
 
 # ---------- Основной цикл ----------
@@ -215,7 +259,7 @@ async def handle(m: Message):
         return
 
     if (world.get("combat") or {}).get("active"):
-        await m.answer("Ты в бою. Используй кнопку ⚔️ Атака.", reply_markup=COMBAT_KB)
+        await m.answer("Ты в бою. Используй кнопки ⚔️ Атака или 🏳 Сдаться.", reply_markup=COMBAT_KB)
         return
 
     if world.get("pending"):
@@ -242,7 +286,7 @@ async def handle(m: Message):
     elif result["type"] == "combat":
         status = C.status_line(world)
         await m.answer(
-            f"{result['text']}\n\n{status}\n\nХод твой — жми ⚔️ Атака.",
+            f"{result['text']}\n\n{status}\n\nХод твой — жми ⚔️ Атака или 🏳 Сдаться.",
             reply_markup=COMBAT_KB,
         )
     else:
