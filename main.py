@@ -103,7 +103,12 @@ async def setup_setting(m: Message, state: FSMContext):
 @dp.message(Setup.name, F.text)
 async def setup_name(m: Message, state: FSMContext):
     await state.update_data(name=m.text.strip())
-    await m.answer("Опиши **характер** персонажа (пара фраз):")
+    await m.answer(
+        "Расскажи коротко о своём персонаже — кто он, откуда, как выглядит, "
+        "какой у него характер и что важно знать. Пара-тройка предложений.\n\n"
+        "_Это описание мастер будет использовать в сценах._",
+        parse_mode="Markdown",
+    )
     await state.set_state(Setup.personality)
 
 
@@ -140,11 +145,46 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
         await cb.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
+
     await cb.message.answer(
         f"Класс: {cls['name']}.\n{cls['desc']}\n\n"
-        f"Скилл: {cls['skill']['name']} — {cls['skill']['desc']}.\n\n"
-        f"Мир создан. {data['name']} входит в историю."
+        f"Скилл: {cls['skill']['name']} — {cls['skill']['desc']}."
     )
+
+    # Стартовая сцена — сразу генерим
+    await cb.message.answer("Создаю мир и начинаю историю…")
+    await bot.send_chat_action(cb.message.chat.id, "typing")
+
+    try:
+        result = await engine.process_action(
+            world,
+            "[Начало игры. Опиши стартовую сцену: где герой, что он видит, "
+            "что происходит вокруг. Завязка сюжета. Дай 3-4 варианта действий.]"
+        )
+        storage.save(cb.from_user.id, world)
+
+        if result["type"] == "check":
+            c = result["check"]
+            await cb.message.answer(
+                result["text"],
+                reply_markup=roll_kb(c.get("stat", "DEX"),
+                                     int(c.get("difficulty", 12))),
+            )
+        elif result["type"] == "combat":
+            status = C.status_line(world)
+            await cb.message.answer(
+                f"{result['text']}\n\n{status}",
+                reply_markup=combat_kb(world),
+            )
+        else:
+            await cb.message.answer(result["text"])
+    except Exception as e:
+        logging.exception("LLM start scene error")
+        await cb.message.answer(
+            f"⚠️ Мастер задумался на старте. Напиши любое действие, "
+            f"чтобы начать. ({e})"
+        )
+
     await cb.answer()
 
 
