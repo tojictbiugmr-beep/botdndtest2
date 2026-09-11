@@ -3,19 +3,14 @@ from config import MAX_EVENTS, EVENTS_CTX, MAX_HISTORY
 def new_world(user_id: int) -> dict:
     return {
         "user_id": user_id,
-        "world": {
-            "setting": "",
-            "tone": "",
-            "milestone": "",
-            "progress": 0,
-            "mode": "AMBIENT",   # AMBIENT | PLOT
-        },
+        "world": {"setting": "", "tone": "", "milestone": "", "progress": 0, "mode": "AMBIENT"},
         "character": {},
-        "npcs": {},              # name -> {"char": "...", "attitude": "..."}
-        "events": [],            # [{"what": "...", "result": "..."}]
+        "npcs": {},
+        "events": [],
         "archive": [],
-        "history": [],           # [{"role":"user"/"assistant","content":"..."}]
-        "pending": None,         # ожидаемая проверка
+        "history": [],
+        "pending": None,
+        "combat": {"active": False, "enemies": [], "log": []},
     }
 
 def push_event(world: dict, what: str, result: str):
@@ -35,7 +30,7 @@ def apply_memory(world: dict, mem: dict):
     """Применяет блок memory из ответа LLM. Все поля опциональны."""
     if not mem:
         return
-
+    
     # Мир
     w = mem.get("world") or {}
     for k in ("setting", "tone", "milestone", "mode"):
@@ -86,6 +81,15 @@ def build_context(world: dict) -> str:
         f"состояние: {c.get('state','')}"
     )
 
+        from character import CLASSES
+cls = CLASSES.get(c.get("cls"), {})
+lines.append(
+    f"ИГРОК: {c.get('name','?')} — {cls.get('name','')}. "
+    f"Характер: {c.get('personality','')}. "
+    f"HP {c.get('hp',0)}/{c.get('hp_max',0)}, золото {c.get('gold',0)}, "
+    f"состояние: {c.get('state','')}"
+)
+    
     if world["npcs"]:
         lines.append("NPC:")
         for name, d in world["npcs"].items():
