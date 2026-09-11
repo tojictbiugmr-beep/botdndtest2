@@ -9,7 +9,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardRemove,
 )
 
 from config import BOT_TOKEN
@@ -72,10 +71,6 @@ def roll_kb(stat: str, difficulty: int) -> InlineKeyboardMarkup:
 @dp.message(Command("start"))
 async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
-
-    # Снимаем залипшую reply-клавиатуру от старого скрипта
-    await m.answer("⋯", reply_markup=ReplyKeyboardRemove())
-
     existing = storage.load(m.from_user.id)
     if existing and existing.get("character"):
         await m.answer("У тебя есть сохранённая партия.", reply_markup=CONTINUE_KB)
