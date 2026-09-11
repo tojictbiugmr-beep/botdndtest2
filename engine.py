@@ -4,6 +4,7 @@ from memory import build_context, apply_memory, push_history
 from dice import resolve
 from combat import start_combat
 
+
 async def process_action(world: dict, user_input: str) -> dict:
     ctx = build_context(world)
     data = await ask_master(ctx, world["history"], user_input)
@@ -41,16 +42,18 @@ def resolve_check(world: dict, d20_data: dict) -> dict:
 
     roll = resolve(mod, diff)
     branch = check.get("success" if roll["success"] else "fail", "")
+
     result_text = (
-        f"{pending['narrative']}\n\n"
         f"🎲 {stat}: d20={roll['d20']} + {mod} = {roll['total']} vs {diff} "
         f"→ {'УСПЕХ' if roll['success'] else 'ПРОВАЛ'}\n\n{branch}"
     )
 
     apply_memory(world, pending["memory"])
-    push_history(world, "user",
-                 f"[бросок {stat}: {roll['total']} vs {diff} — "
-                 f"{'успех' if roll['success'] else 'провал'}]")
+    push_history(
+        world, "user",
+        f"[бросок {stat}: {roll['total']} vs {diff} — "
+        f"{'успех' if roll['success'] else 'провал'}]"
+    )
 
     world["pending"] = None
     return {"type": "text", "text": result_text, "roll": roll}
