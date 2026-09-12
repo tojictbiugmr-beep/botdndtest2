@@ -81,7 +81,10 @@ def resolve_check(world: dict, d20_data: dict) -> dict:
 
     check = pending["check"]
     stat = check.get("stat", "DEX")
-    diff = int(check.get("difficulty", 12))
+    try:
+    diff = int(str(check.get("difficulty", 12)).replace("%", "").strip())
+except (ValueError, TypeError):
+    diff = 12
     mod = int(world["character"]["stats"].get(stat, 0))
 
     roll = resolve(mod, diff)
