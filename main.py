@@ -67,6 +67,13 @@ def roll_kb(stat: str, difficulty: int) -> InlineKeyboardMarkup:
     ]])
 
 
+def _safe_int(value, default: int) -> int:
+    try:
+        return int(str(value).replace("%", "").strip())
+    except (ValueError, TypeError):
+        return default
+
+
 # ---------- /start ----------
 @dp.message(Command("start"))
 async def cmd_start(m: Message, state: FSMContext):
@@ -151,7 +158,6 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
         f"Скилл: {cls['skill']['name']} — {cls['skill']['desc']}."
     )
 
-    # Стартовая сцена — сразу генерим
     await cb.message.answer("Создаю мир и начинаю историю…")
     await bot.send_chat_action(cb.message.chat.id, "typing")
 
@@ -165,17 +171,10 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
 
         if result["type"] == "check":
             c = result["check"]
+            difficulty = _safe_int(c.get("difficulty", 12), 12)
             await cb.message.answer(
                 result["text"],
-difficulty = 12
-try:
-    difficulty = int(str(c.get("difficulty", 12)).replace("%", "").strip())
-except (ValueError, TypeError):
-    pass
-await m.answer(
-    result["text"],
-    reply_markup=roll_kb(c.get("stat", "DEX"), difficulty),
-)
+                reply_markup=roll_kb(c.get("stat", "DEX"), difficulty),
             )
         elif result["type"] == "combat":
             status = C.status_line(world)
@@ -389,9 +388,10 @@ async def handle(m: Message):
 
     if result["type"] == "check":
         c = result["check"]
+        difficulty = _safe_int(c.get("difficulty", 12), 12)
         await m.answer(
             result["text"],
-            reply_markup=roll_kb(c.get("stat", "DEX"), int(c.get("difficulty", 12))),
+            reply_markup=roll_kb(c.get("stat", "DEX"), difficulty),
         )
     elif result["type"] == "combat":
         status = C.status_line(world)
