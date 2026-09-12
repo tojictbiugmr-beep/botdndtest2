@@ -167,8 +167,15 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
             c = result["check"]
             await cb.message.answer(
                 result["text"],
-                reply_markup=roll_kb(c.get("stat", "DEX"),
-                                     int(c.get("difficulty", 12))),
+difficulty = 12
+try:
+    difficulty = int(str(c.get("difficulty", 12)).replace("%", "").strip())
+except (ValueError, TypeError):
+    pass
+await m.answer(
+    result["text"],
+    reply_markup=roll_kb(c.get("stat", "DEX"), difficulty),
+)
             )
         elif result["type"] == "combat":
             status = C.status_line(world)
