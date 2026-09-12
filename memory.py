@@ -45,8 +45,12 @@ def apply_memory(world: dict, mem: dict):
     for k in ("setting", "tone", "milestone", "mode"):
         if w.get(k):
             world["world"][k] = w[k]
-    if "progress" in w and w["progress"] is not None:
-        world["world"]["progress"] = int(w["progress"])
+if "progress" in w and w["progress"] is not None:
+    try:
+        raw = str(w["progress"]).replace("%", "").strip()
+        world["world"]["progress"] = int(float(raw))
+    except (ValueError, TypeError):
+        pass
 
     if mem.get("character"):
         apply_delta(world["character"], mem["character"])
