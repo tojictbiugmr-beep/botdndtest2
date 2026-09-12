@@ -18,6 +18,13 @@ COMBAT_WORDS = re.compile(
 )
 
 
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(float(str(value).replace("%", "").strip()))
+    except (ValueError, TypeError):
+        return default
+
+
 async def process_action(world: dict, user_input: str) -> dict:
     ctx = build_context(world)
     data = await ask_master(ctx, world["history"], user_input)
@@ -81,11 +88,8 @@ def resolve_check(world: dict, d20_data: dict) -> dict:
 
     check = pending["check"]
     stat = check.get("stat", "DEX")
-    try:
-    diff = int(str(check.get("difficulty", 12)).replace("%", "").strip())
-except (ValueError, TypeError):
-    diff = 12
-    mod = int(world["character"]["stats"].get(stat, 0))
+    diff = _safe_int(check.get("difficulty", 12), 12)
+    mod = _safe_int(world["character"]["stats"].get(stat, 0), 0)
 
     roll = resolve(mod, diff)
     branch = check.get("success" if roll["success"] else "fail", "")
