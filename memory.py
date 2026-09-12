@@ -37,6 +37,13 @@ def push_history(world: dict, role: str, content: str):
         world["history"] = world["history"][-MAX_HISTORY:]
 
 
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(float(str(value).replace("%", "").strip()))
+    except (ValueError, TypeError):
+        return default
+
+
 def apply_memory(world: dict, mem: dict):
     if not mem:
         return
@@ -45,12 +52,9 @@ def apply_memory(world: dict, mem: dict):
     for k in ("setting", "tone", "milestone", "mode"):
         if w.get(k):
             world["world"][k] = w[k]
-if "progress" in w and w["progress"] is not None:
-    try:
-        raw = str(w["progress"]).replace("%", "").strip()
-        world["world"]["progress"] = int(float(raw))
-    except (ValueError, TypeError):
-        pass
+
+    if "progress" in w and w["progress"] is not None:
+        world["world"]["progress"] = _safe_int(w["progress"], world["world"].get("progress", 0))
 
     if mem.get("character"):
         apply_delta(world["character"], mem["character"])
