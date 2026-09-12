@@ -69,7 +69,7 @@ def roll_kb(stat: str, difficulty: int) -> InlineKeyboardMarkup:
 
 def _safe_int(value, default: int) -> int:
     try:
-        return int(str(value).replace("%", "").strip())
+        return int(float(str(value).replace("%", "").strip()))
     except (ValueError, TypeError):
         return default
 
@@ -338,10 +338,22 @@ async def cb_flee(cb: CallbackQuery):
     except Exception:
         pass
 
-    await cb.message.answer(
-        "🏳 Ты отступаешь. Бой прерван, HP восстановлен. "
-        "Опиши, куда бежишь — или что делаешь дальше."
-    )
+    await cb.message.answer("🏳 Ты отступаешь. Бой прерван, HP восстановлен.")
+
+    # Сообщаем мастеру, что бой окончен — иначе он продолжает думать, что идёт схватка
+    await bot.send_chat_action(cb.message.chat.id, "typing")
+    try:
+        result = await engine.process_action(
+            world,
+            "[Игрок сбежал из боя. Опиши последствия отступления: куда он "
+            "бежит, что происходит вокруг, кто преследует. Продолжи сюжет, "
+            "дай 3-4 варианта действий.]"
+        )
+        storage.save(cb.from_user.id, world)
+        await cb.message.answer(result["text"])
+    except Exception as e:
+        logging.exception("LLM after flee")
+        await cb.message.answer(f"(мастер промолчал: {e})")
 
 
 # ---------- Команда /flee ----------
@@ -354,6 +366,18 @@ async def cmd_flee(m: Message):
     C.end_combat(world)
     storage.save(m.from_user.id, world)
     await m.answer("🏳 Ты выходишь из боя. HP восстановлен.")
+
+    await bot.send_chat_action(m.chat.id, "typing")
+    try:
+        result = await engine.process_action(
+            world,
+            "[Игрок сбежал из боя. Опиши последствия отступления, продолжи сюжет.]"
+        )
+        storage.save(m.from_user.id, world)
+        await m.answer(result["text"])
+    except Exception as e:
+        logging.exception("LLM after flee")
+        await m.answer(f"(мастер промолчал: {e})")
 
 
 # ---------- Основной цикл ----------
