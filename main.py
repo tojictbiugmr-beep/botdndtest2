@@ -87,12 +87,22 @@ def inventory_kb(world: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def item_kb(idx: int, item: dict) -> InlineKeyboardMarkup:
+def item_kb(idx: int, item: dict, char: dict) -> InlineKeyboardMarkup:
     rows = []
     if item.get("type") == "potion":
         rows.append([InlineKeyboardButton(text="✅ Использовать",
                                           callback_data=f"inv_use_{idx}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="inv_open")])
+    if I.can_upgrade(item):
+        cost = I.upgrade_cost(item)
+        shards = char.get("shards", 0)
+        if shards >= cost:
+            label = f"⚒ Улучшить ({cost} 🔹)"
+        else:
+            label = f"⚒ Нужно {cost} 🔹"
+        rows.append([InlineKeyboardButton(text=label,
+                                          callback_data=f"inv_upgrade_{idx}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад",
+                                      callback_data="inv_open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -109,10 +119,8 @@ async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
     existing = storage.load(m.from_user.id)
     if existing and existing.get("character"):
-        await m.answer(
-            "У тебя есть сохранённая партия.",
-            reply_markup=INVENTORY_KB,
-        )
+        await m.answer("У тебя есть сохранённая партия.",
+                       reply_markup=INVENTORY_KB)
         await m.answer("Выбери действие:", reply_markup=CONTINUE_KB)
         return
     await m.answer(
@@ -256,12 +264,15 @@ async def btn_inventory(m: Message):
         await m.answer("Начни с /start")
         return
     inv = world["character"].get("inventory", [])
+    shards = world["character"].get("shards", 0)
     if not inv:
-        await m.answer("🎒 Инвентарь пуст.")
+        await m.answer(f"🎒 Инвентарь пуст. 🔹 Осколки: {shards}")
         return
-    await m.answer("🎒 **Инвентарь**\nВыбери предмет:",
-                   parse_mode="Markdown",
-                   reply_markup=inventory_kb(world))
+    await m.answer(
+        f"🎒 **Инвентарь**  |  🔹 Осколки: {shards}\nВыбери предмет:",
+        parse_mode="Markdown",
+        reply_markup=inventory_kb(world),
+    )
 
 
 @dp.callback_query(F.data == "inv_open")
@@ -271,15 +282,16 @@ async def cb_inv_open(cb: CallbackQuery):
     if not world:
         return
     inv = world["character"].get("inventory", [])
+    shards = world["character"].get("shards", 0)
     if not inv:
         try:
-            await cb.message.edit_text("🎒 Инвентарь пуст.")
+            await cb.message.edit_text(f"🎒 Инвентарь пуст. 🔹 Осколки: {shards}")
         except Exception:
             pass
         return
     try:
         await cb.message.edit_text(
-            "🎒 **Инвентарь**\nВыбери предмет:",
+            f"🎒 **Инвентарь**  |  🔹 Осколки: {shards}\nВыбери предмет:",
             parse_mode="Markdown",
             reply_markup=inventory_kb(world),
         )
@@ -328,7 +340,6 @@ async def cb_inv_use(cb: CallbackQuery):
         pass
 
     if in_combat and C.combat_over(world):
-        # Внезапно добили — возвращаем ход мастеру через обычную концовку
         if world["character"]["hp"] <= 0:
             result_text += "\n\n☠️ Ты повержен. Напиши /start, чтобы начать заново."
             C.end_combat(world)
@@ -354,11 +365,38 @@ async def cb_inv_use(cb: CallbackQuery):
     await cb.message.answer(result_text, reply_markup=INVENTORY_KB)
 
 
+@dp.callback_query(F.data.startswith("inv_upgrade_"))
+async def cb_inv_upgrade(cb: CallbackQuery):
+    await cb.answer()
+    world = storage.load(cb.from_user.id)
+    if not world:
+        return
+    try:
+        idx = int(cb.data.replace("inv_upgrade_", ""))
+    except ValueError:
+        return
+
+    result = I.upgrade_item(world["character"], idx)
+    storage.save(cb.from_user.id, world)
+
+    inv = world["character"].get("inventory", [])
+    if 0 <= idx < len(inv):
+        item = inv[idx]
+        try:
+            await cb.message.edit_text(
+                result + "\n\n" + I.item_info(item),
+                reply_markup=item_kb(idx, item, world["character"]),
+            )
+        except Exception:
+            await cb.message.answer(result)
+    else:
+        await cb.message.answer(result)
+
+
 @dp.callback_query(F.data.startswith("inv_"))
 async def cb_inv_item(cb: CallbackQuery):
-    # not inv_open/close/use handled above
     suffix = cb.data.replace("inv_", "")
-    if suffix in ("open", "close") or suffix.startswith("use_"):
+    if suffix in ("open", "close") or suffix.startswith("use_") or suffix.startswith("upgrade_"):
         return
     try:
         idx = int(suffix)
@@ -378,7 +416,10 @@ async def cb_inv_item(cb: CallbackQuery):
     item = inv[idx]
     text = I.item_info(item)
     try:
-        await cb.message.edit_text(text, reply_markup=item_kb(idx, item))
+        await cb.message.edit_text(
+            text,
+            reply_markup=item_kb(idx, item, world["character"]),
+        )
     except Exception:
         pass
 
@@ -516,8 +557,7 @@ async def cb_flee(cb: CallbackQuery):
         result = await engine.process_action(
             world,
             "[Игрок сбежал из боя. Опиши последствия отступления: куда он "
-            "бежит, что происходит вокруг, кто преследует. Продолжи сюжет, "
-            "дай 3-4 варианта действий.]"
+            "бежит, что происходит вокруг, кто преследует. Продолжи сюжет.]"
         )
         storage.save(cb.from_user.id, world)
         await cb.message.answer(result["text"])
