@@ -9,12 +9,14 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
+    ReplyKeyboardMarkup, KeyboardButton,
 )
 
 from config import BOT_TOKEN
 import storage
 import engine
 import combat as C
+import inventory as I
 from memory import new_world
 from character import new_character, CLASSES
 
@@ -31,6 +33,12 @@ class Setup(StatesGroup):
 
 
 # ---------- Клавиатуры ----------
+INVENTORY_KB = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="🎒 Инвентарь")]],
+    resize_keyboard=True,
+    is_persistent=True,
+)
+
 CONTINUE_KB = InlineKeyboardMarkup(inline_keyboard=[[
     InlineKeyboardButton(text="▶️ Продолжить", callback_data="continue"),
     InlineKeyboardButton(text="🔄 Новая игра", callback_data="restart"),
@@ -67,6 +75,27 @@ def roll_kb(stat: str, difficulty: int) -> InlineKeyboardMarkup:
     ]])
 
 
+def inventory_kb(world: dict) -> InlineKeyboardMarkup:
+    inv = world["character"].get("inventory", [])
+    rows = []
+    for i, item in enumerate(inv):
+        rows.append([InlineKeyboardButton(
+            text=I.format_item_line(item),
+            callback_data=f"inv_{i}",
+        )])
+    rows.append([InlineKeyboardButton(text="✖️ Закрыть", callback_data="inv_close")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def item_kb(idx: int, item: dict) -> InlineKeyboardMarkup:
+    rows = []
+    if item.get("type") == "potion":
+        rows.append([InlineKeyboardButton(text="✅ Использовать",
+                                          callback_data=f"inv_use_{idx}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="inv_open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def _safe_int(value, default: int) -> int:
     try:
         return int(float(str(value).replace("%", "").strip()))
@@ -80,21 +109,28 @@ async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
     existing = storage.load(m.from_user.id)
     if existing and existing.get("character"):
-        await m.answer("У тебя есть сохранённая партия.", reply_markup=CONTINUE_KB)
+        await m.answer(
+            "У тебя есть сохранённая партия.",
+            reply_markup=INVENTORY_KB,
+        )
+        await m.answer("Выбери действие:", reply_markup=CONTINUE_KB)
         return
-    await m.answer("Новая игра.\n\nОпиши **сеттинг** мира (эпоха, жанр, атмосфера):")
+    await m.answer(
+        "Новая игра.\n\nОпиши **сеттинг** мира (эпоха, жанр, атмосфера):",
+        reply_markup=INVENTORY_KB,
+    )
     await state.set_state(Setup.setting)
 
 
 @dp.callback_query(F.data == "continue")
 async def cb_continue(cb: CallbackQuery):
-    await cb.message.answer("Продолжаем. Что делаешь?")
+    await cb.message.answer("Продолжаем. Что делаешь?", reply_markup=INVENTORY_KB)
     await cb.answer()
 
 
 @dp.callback_query(F.data == "restart")
 async def cb_restart(cb: CallbackQuery, state: FSMContext):
-    await cb.message.answer("Опиши **сеттинг** мира:")
+    await cb.message.answer("Опиши **сеттинг** мира:", reply_markup=INVENTORY_KB)
     await state.set_state(Setup.setting)
     await cb.answer()
 
@@ -155,7 +191,8 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
 
     await cb.message.answer(
         f"Класс: {cls['name']}.\n{cls['desc']}\n\n"
-        f"Скилл: {cls['skill']['name']} — {cls['skill']['desc']}."
+        f"Скилл: {cls['skill']['name']} — {cls['skill']['desc']}.",
+        reply_markup=INVENTORY_KB,
     )
 
     await cb.message.answer("Создаю мир и начинаю историю…")
@@ -209,6 +246,141 @@ async def cb_roll(cb: CallbackQuery):
     except Exception:
         pass
     await cb.message.answer(result["text"])
+
+
+# ---------- Инвентарь ----------
+@dp.message(F.text == "🎒 Инвентарь")
+async def btn_inventory(m: Message):
+    world = storage.load(m.from_user.id)
+    if not world or not world.get("character"):
+        await m.answer("Начни с /start")
+        return
+    inv = world["character"].get("inventory", [])
+    if not inv:
+        await m.answer("🎒 Инвентарь пуст.")
+        return
+    await m.answer("🎒 **Инвентарь**\nВыбери предмет:",
+                   parse_mode="Markdown",
+                   reply_markup=inventory_kb(world))
+
+
+@dp.callback_query(F.data == "inv_open")
+async def cb_inv_open(cb: CallbackQuery):
+    await cb.answer()
+    world = storage.load(cb.from_user.id)
+    if not world:
+        return
+    inv = world["character"].get("inventory", [])
+    if not inv:
+        try:
+            await cb.message.edit_text("🎒 Инвентарь пуст.")
+        except Exception:
+            pass
+        return
+    try:
+        await cb.message.edit_text(
+            "🎒 **Инвентарь**\nВыбери предмет:",
+            parse_mode="Markdown",
+            reply_markup=inventory_kb(world),
+        )
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data == "inv_close")
+async def cb_inv_close(cb: CallbackQuery):
+    await cb.answer()
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data.startswith("inv_use_"))
+async def cb_inv_use(cb: CallbackQuery):
+    await cb.answer()
+    world = storage.load(cb.from_user.id)
+    if not world:
+        return
+    try:
+        idx = int(cb.data.replace("inv_use_", ""))
+    except ValueError:
+        return
+
+    inv = world["character"].get("inventory", [])
+    if idx < 0 or idx >= len(inv):
+        await cb.message.answer("Предмет исчез.")
+        return
+
+    result_text = I.use_potion(world["character"], idx)
+    in_combat = (world.get("combat") or {}).get("active")
+
+    if in_combat and not C.combat_over(world):
+        enemy_log = C.enemy_turn(world)
+        if enemy_log:
+            result_text += "\n\n" + enemy_log
+
+    storage.save(cb.from_user.id, world)
+
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    if in_combat and C.combat_over(world):
+        # Внезапно добили — возвращаем ход мастеру через обычную концовку
+        if world["character"]["hp"] <= 0:
+            result_text += "\n\n☠️ Ты повержен. Напиши /start, чтобы начать заново."
+            C.end_combat(world)
+            storage.save(cb.from_user.id, world)
+            await cb.message.answer(result_text)
+            return
+        summary, level_msgs = C.end_combat(world)
+        result_text += f"\n\n✅ {summary}\n❤️ HP восстановлен."
+        if level_msgs:
+            result_text += "\n\n" + "\n".join(level_msgs)
+        storage.save(cb.from_user.id, world)
+        await cb.message.answer(result_text)
+        await bot.send_chat_action(cb.message.chat.id, "typing")
+        try:
+            result = await engine.process_action(world, "[бой окончен, продолжаю]")
+            storage.save(cb.from_user.id, world)
+            await cb.message.answer(result["text"])
+        except Exception as e:
+            logging.exception("LLM after combat")
+            await cb.message.answer(f"(мастер промолчал: {e})")
+        return
+
+    await cb.message.answer(result_text, reply_markup=INVENTORY_KB)
+
+
+@dp.callback_query(F.data.startswith("inv_"))
+async def cb_inv_item(cb: CallbackQuery):
+    # not inv_open/close/use handled above
+    suffix = cb.data.replace("inv_", "")
+    if suffix in ("open", "close") or suffix.startswith("use_"):
+        return
+    try:
+        idx = int(suffix)
+    except ValueError:
+        await cb.answer()
+        return
+
+    await cb.answer()
+    world = storage.load(cb.from_user.id)
+    if not world:
+        return
+    inv = world["character"].get("inventory", [])
+    if idx < 0 or idx >= len(inv):
+        await cb.message.answer("Предмет исчез.")
+        return
+
+    item = inv[idx]
+    text = I.item_info(item)
+    try:
+        await cb.message.edit_text(text, reply_markup=item_kb(idx, item))
+    except Exception:
+        pass
 
 
 # ---------- Бой: атака ----------
@@ -291,7 +463,6 @@ async def cb_skill(cb: CallbackQuery):
 
 
 async def _finish_turn(cb: CallbackQuery, world: dict, text: str):
-    """Общая концовка хода в бою: победа / смерть / продолжение."""
     if not C.combat_over(world):
         await cb.message.answer(text, reply_markup=combat_kb(world))
         return
@@ -340,7 +511,6 @@ async def cb_flee(cb: CallbackQuery):
 
     await cb.message.answer("🏳 Ты отступаешь. Бой прерван, HP восстановлен.")
 
-    # Сообщаем мастеру, что бой окончен — иначе он продолжает думать, что идёт схватка
     await bot.send_chat_action(cb.message.chat.id, "typing")
     try:
         result = await engine.process_action(
