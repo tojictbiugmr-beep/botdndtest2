@@ -1,6 +1,6 @@
 from config import MAX_EVENTS, EVENTS_CTX, MAX_HISTORY
 from character import CLASSES, apply_delta
-from inventory import add_item, remove_item, format_item_line
+from inventory import add_item, remove_item
 
 
 def new_world(user_id: int) -> dict:
@@ -95,7 +95,14 @@ def apply_memory(world: dict, mem: dict):
 
 
 def build_context(world: dict) -> str:
+    """
+    Контекст для мастера. Память мастера ≠ знания NPC.
+    Явно помечаем разделы, чтобы LLM не давала NPC недоступную информацию.
+    """
     lines = []
+
+    lines.append("=== ПАМЯТЬ МАСТЕРА (не знания NPC) ===")
+
     w = world["world"]
     lines.append(f"МИР: {w['setting']} | тон: {w['tone']}")
     lines.append(f"MILESTONE: {w['milestone'] or '—'} ({w['progress']}%)")
@@ -104,16 +111,16 @@ def build_context(world: dict) -> str:
     c = world["character"]
     cls = CLASSES.get(c.get("cls"), {})
     lines.append(
-        f"ИГРОК: {c.get('name','?')} — {cls.get('name','')}. "
-        f"Описание: {c.get('personality','')}. "
-        f"HP {c.get('hp',0)}/{c.get('hp_max',0)}, золото {c.get('gold',0)}, "
-        f"состояние: {c.get('state','')}"
+        f"ИГРОК (служебные данные, NPC их не знают): "
+        f"{c.get('name','?')} — {cls.get('name','')}, ур. {c.get('level',1)}. "
+        f"Описание (для отыгрыша): {c.get('personality','')}. "
+        f"HP {c.get('hp',0)}/{c.get('hp_max',0)}, "
+        f"золото {c.get('gold',0)}, состояние: {c.get('state','')}"
     )
 
-    # Инвентарь — чтобы мастер знал, что у игрока есть
     inv = c.get("inventory", [])
     if inv:
-        lines.append("ИНВЕНТАРЬ:")
+        lines.append("ИНВЕНТАРЬ (у игрока):")
         for it in inv:
             qty = it.get("qty", 1)
             qty_str = f" ×{qty}" if qty > 1 else ""
@@ -121,13 +128,18 @@ def build_context(world: dict) -> str:
             lines.append(f"  • {it['name']}{qty_str}{desc}")
 
     if world["npcs"]:
-        lines.append("NPC:")
+        lines.append("")
+        lines.append("ИЗВЕСТНЫЕ NPC (мастер знает о них; сами NPC знают только то,")
+        lines.append("что видели/слышали лично. Отношение — к игроку, знает только мастер):")
         for name, d in world["npcs"].items():
-            lines.append(f"  • {name}: {d['char']} | отношение: {d['attitude']}")
+            lines.append(f"  • {name}: {d['char']} | отношение к игроку: {d['attitude']}")
 
     if world["events"]:
-        lines.append("ПОСЛЕДНИЕ СОБЫТИЯ:")
+        lines.append("")
+        lines.append("ПОСЛЕДНИЕ СОБЫТИЯ (что произошло в мире — НЕ то, что знают все):")
         for e in world["events"][-EVENTS_CTX:]:
             lines.append(f"  • {e['what']} → {e['result']}")
+
+    lines.append("=== КОНЕЦ ПАМЯТИ МАСТЕРА ===")
 
     return "\n".join(lines)
