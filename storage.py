@@ -18,9 +18,11 @@ def _migrate(world: dict) -> dict:
         char.setdefault("charges_max", CHARGES_PER_FIGHT)
         char.setdefault("level", 1)
         char.setdefault("xp", 0)
+        char.setdefault("shards", 0)
         _, dmg, armor = level_bonus(char.get("level", 1))
         char.setdefault("dmg_bonus", dmg)
         char.setdefault("armor_bonus", armor)
+        char.setdefault("inventory", [])
     if "combat" not in world or not isinstance(world.get("combat"), dict):
         world["combat"] = {"active": False, "enemies": [], "log": []}
     return world
