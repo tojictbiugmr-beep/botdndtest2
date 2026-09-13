@@ -1,5 +1,6 @@
 from config import MAX_EVENTS, EVENTS_CTX, MAX_HISTORY
 from character import CLASSES, apply_delta
+from inventory import add_item, remove_item, format_item_line
 
 
 def new_world(user_id: int) -> dict:
@@ -54,7 +55,9 @@ def apply_memory(world: dict, mem: dict):
             world["world"][k] = w[k]
 
     if "progress" in w and w["progress"] is not None:
-        world["world"]["progress"] = _safe_int(w["progress"], world["world"].get("progress", 0))
+        world["world"]["progress"] = _safe_int(
+            w["progress"], world["world"].get("progress", 0)
+        )
 
     if mem.get("character"):
         apply_delta(world["character"], mem["character"])
@@ -75,16 +78,17 @@ def apply_memory(world: dict, mem: dict):
                 "char": data.get("char", ""),
                 "attitude": data.get("attitude", ""),
             }
-# Инвентарь: выдача   
-    from inventory import add_item, remove_item
-    for item in (mem.get("inventory_add") or []):
-    if isinstance(item, dict):
-        add_item(world["character"], item)
-# Инвентарь: забор
-    for name in (mem.get("inventory_remove") or []):
-    remove_item(world["character"], name)
 
-    
+    # Инвентарь: выдача
+    for item in (mem.get("inventory_add") or []):
+        if isinstance(item, dict):
+            add_item(world["character"], item)
+
+    # Инвентарь: забор
+    for name in (mem.get("inventory_remove") or []):
+        if isinstance(name, str):
+            remove_item(world["character"], name)
+
     ev = mem.get("event")
     if ev:
         push_event(world, ev.get("what", ""), ev.get("result", ""))
@@ -105,6 +109,16 @@ def build_context(world: dict) -> str:
         f"HP {c.get('hp',0)}/{c.get('hp_max',0)}, золото {c.get('gold',0)}, "
         f"состояние: {c.get('state','')}"
     )
+
+    # Инвентарь — чтобы мастер знал, что у игрока есть
+    inv = c.get("inventory", [])
+    if inv:
+        lines.append("ИНВЕНТАРЬ:")
+        for it in inv:
+            qty = it.get("qty", 1)
+            qty_str = f" ×{qty}" if qty > 1 else ""
+            desc = f" — {it['desc']}" if it.get("desc") else ""
+            lines.append(f"  • {it['name']}{qty_str}{desc}")
 
     if world["npcs"]:
         lines.append("NPC:")
