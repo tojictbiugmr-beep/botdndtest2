@@ -97,6 +97,7 @@ def new_character(name: str, personality: str, cls_key: str) -> dict:
         "armor_bonus": armor_bonus,
         "charges": CHARGES_PER_FIGHT,
         "charges_max": CHARGES_PER_FIGHT,
+        "shards": 0,
         "inventory": inventory,
     }
 
