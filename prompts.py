@@ -111,5 +111,4 @@ check и start_combat не могут быть одновременно. Есл�
 
 
 def context_block(memory_text: str) -> str:
-    """Память мастера уже обёрнута в build_context — не оборачиваем повторно."""
     return memory_text
