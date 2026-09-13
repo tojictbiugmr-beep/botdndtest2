@@ -2,20 +2,53 @@ from dice import roll_d20, roll_expr
 from character import CLASSES, check_level_up, CHARGES_PER_FIGHT
 
 
+def _weapon_bonus(char: dict) -> int:
+    best = 0
+    for it in char.get("inventory", []):
+        if it.get("type") == "weapon":
+            best = max(best, it.get("attack_bonus", 0))
+    return best
+
+
+def _armor_item_bonus(char: dict) -> int:
+    best = 0
+    for it in char.get("inventory", []):
+        if it.get("type") == "armor":
+            best = max(best, it.get("defense_bonus", 0))
+    return best
+
+
 def player_defense(char: dict) -> int:
-    return 10 + char["stats"].get("DEX", 0) + char.get("armor_bonus", 0)
+    return (
+        10
+        + char["stats"].get("DEX", 0)
+        + char.get("armor_bonus", 0)
+        + _armor_item_bonus(char)
+    )
+
+
+def _shards_for_hp(hp: int) -> int:
+    if hp >= 40:
+        return 10
+    if hp >= 30:
+        return 6
+    if hp >= 20:
+        return 4
+    if hp >= 12:
+        return 2
+    return 1
 
 
 def _guess_xp(hp: int) -> int:
     if hp >= 40:
-        return 150   # босс
+        return 150
     if hp >= 30:
-        return 70    # мини-босс
+        return 70
     if hp >= 20:
-        return 45    # сильный
+        return 45
     if hp >= 12:
-        return 20    # средний
-    return 8         # слабый
+        return 20
+    return 8
 
 
 def _attack_roll(mod: int, target_def: int) -> dict:
@@ -58,7 +91,7 @@ def _fmt_damage(d: dict) -> str:
             + f" = {d['total']}")
 
 
-def start_combat(world: dict, enemies: list[dict]):
+def start_combat(world: dict, enemies: list):
     world["combat"] = {
         "active": True,
         "enemies": [
@@ -70,6 +103,7 @@ def start_combat(world: dict, enemies: list[dict]):
                 "attack_stat": int(e.get("attack_stat", 2)),
                 "damage": e.get("damage", "1d4"),
                 "xp": int(e.get("xp") or _guess_xp(int(e.get("hp", 8)))),
+                "shards": int(e.get("shards") or _shards_for_hp(int(e.get("hp", 8)))),
             }
             for e in enemies
         ],
@@ -89,9 +123,11 @@ def combat_over(world: dict) -> bool:
 def _kill_enemy(world: dict, enemy: dict) -> str:
     char = world["character"]
     xp = enemy.get("xp", 8)
+    shards = enemy.get("shards", 1)
     char["xp"] = char.get("xp", 0) + xp
+    char["shards"] = char.get("shards", 0) + shards
     world["combat"]["enemies"].remove(enemy)
-    return f"☠️ {enemy['name']} повержен. +{xp} XP"
+    return f"☠️ {enemy['name']} повержен. +{xp} XP, +{shards} 🔹"
 
 
 def player_attack(world: dict) -> str:
@@ -103,7 +139,8 @@ def player_attack(world: dict) -> str:
     enemy = c["enemies"][0]
     cls = CLASSES.get(char.get("cls"), CLASSES["warrior"])
     stat = cls["attack_stat"]
-    mod = char["stats"].get(stat, 0)
+    w_bonus = _weapon_bonus(char)
+    mod = char["stats"].get(stat, 0) + w_bonus
     dmg_bonus = char.get("dmg_bonus", 0)
 
     r = _attack_roll(mod, enemy["defense"])
@@ -116,7 +153,7 @@ def player_attack(world: dict) -> str:
         lines.append("Промах.")
         return "\n".join(lines)
 
-    d = _damage(cls["damage"], r["crit"], mod, dmg_bonus)
+    d = _damage(cls["damage"], r["crit"], char["stats"].get(stat, 0), dmg_bonus)
     enemy["hp"] = max(0, enemy["hp"] - d["total"])
     tag = " 💥 КРИТ!" if r["crit"] else ""
     lines.append(f"Урон{tag}: {_fmt_damage(d)}")
@@ -139,14 +176,13 @@ def player_skill(world: dict) -> str:
 
     cls = CLASSES.get(char.get("cls"), CLASSES["warrior"])
     stat = cls["attack_stat"]
-    mod = char["stats"].get(stat, 0)
+    w_bonus = _weapon_bonus(char)
+    mod = char["stats"].get(stat, 0) + w_bonus
     dmg_bonus = char.get("dmg_bonus", 0)
     skill_name = cls["skill"]["name"]
 
-    # Один d20 на всех, DC = максимальная защита в группе
     target_def = max(e["defense"] for e in c["enemies"])
     r = _attack_roll(mod, target_def)
-
     char["charges"] = char.get("charges", 0) - 1
 
     lines = [
@@ -158,16 +194,17 @@ def player_skill(world: dict) -> str:
         lines.append("Скилл ушёл в молоко — никто не пострадал.")
         return "\n".join(lines)
 
-    # Урон как обычная атака, но -15%, при крите х2
-    d = _damage(cls["damage"], False, mod, dmg_bonus)
+    d = _damage(cls["damage"], False, char["stats"].get(stat, 0), dmg_bonus)
     base = d["total"]
     after15 = int(base * 0.85)
     final = after15 * 2 if r["crit"] else after15
     tag = " 💥 КРИТ!" if r["crit"] else ""
     lines.append(
         f"Урон по всем{tag}: {d['expr']} → {d['rolls']} = {d['dice_sum']} + "
-        f"{mod}" + (f" + {dmg_bonus}" if dmg_bonus else "") +
-        f" = {base} × 0.85 = {after15}" + (f" × 2 = {final}" if r["crit"] else "")
+        f"{d['stat_mod']}"
+        + (f" + {d['dmg_bonus']}" if d["dmg_bonus"] else "")
+        + f" = {base} × 0.85 = {after15}"
+        + (f" × 2 = {final}" if r["crit"] else "")
     )
 
     for enemy in list(c["enemies"]):
@@ -209,7 +246,7 @@ def enemy_turn(world: dict) -> str:
     return "\n".join(lines)
 
 
-def end_combat(world: dict) -> str:
+def end_combat(world: dict):
     c = world.get("combat") or {}
     enemies = c.get("enemies") or []
     if not enemies:
@@ -222,7 +259,6 @@ def end_combat(world: dict) -> str:
     char["charges"] = char.get("charges_max", CHARGES_PER_FIGHT)
 
     msgs = check_level_up(char)
-
     world["combat"] = {"active": False, "enemies": [], "log": []}
     return summary, msgs
 
@@ -237,5 +273,6 @@ def status_line(world: dict) -> str:
     )
     return (
         f"❤️ Ты: {ch['hp']}/{ch['hp_max']}  "
-        f"| 🌀 {ch.get('charges', 0)}  |  {enemies}"
+        f"| 🌀 {ch.get('charges', 0)}  "
+        f"| 🔹 {ch.get('shards', 0)}  |  {enemies}"
     )
