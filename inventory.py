@@ -1,7 +1,14 @@
-import random
 from dice import roll_expr
 
 MAX_POTION_STACK = 10
+
+UPGRADE_COSTS = {0: 8, 1: 20, 2: 45}
+QUALITY_NAMES = {
+    0: "обычное",
+    1: "🟢 зелёное",
+    2: "🟣 фиолетовое",
+    3: "🟡 золотое",
+}
 
 ITEM_EMOJI = {
     "weapon": "🗡",
@@ -9,7 +16,6 @@ ITEM_EMOJI = {
     "potion": "🧪",
     "misc": "📦",
     "torch": "🔥",
-    "lighter": "✨",
 }
 
 
@@ -42,7 +48,7 @@ def remove_item(char: dict, name: str, qty: int = 1) -> bool:
     return False
 
 
-def find_item(char: dict, name: str) -> dict | None:
+def find_item(char: dict, name: str):
     for it in char.get("inventory", []):
         if it["name"] == name:
             return it
@@ -50,7 +56,6 @@ def find_item(char: dict, name: str) -> dict | None:
 
 
 def use_potion(char: dict, idx: int) -> str:
-    """Возвращает строку с результатом."""
     inv = char.get("inventory", [])
     if idx < 0 or idx >= len(inv):
         return "Предмет не найден."
@@ -78,6 +83,47 @@ def use_potion(char: dict, idx: int) -> str:
     )
 
 
+def can_upgrade(item: dict) -> bool:
+    if item.get("type") not in ("weapon", "armor"):
+        return False
+    return item.get("quality", 0) < 3
+
+
+def upgrade_cost(item: dict):
+    return UPGRADE_COSTS.get(item.get("quality", 0))
+
+
+def upgrade_item(char: dict, idx: int) -> str:
+    inv = char.get("inventory", [])
+    if idx < 0 or idx >= len(inv):
+        return "Предмет не найден."
+
+    item = inv[idx]
+    if not can_upgrade(item):
+        return "Этот предмет нельзя улучшить."
+
+    cost = upgrade_cost(item)
+    shards = char.get("shards", 0)
+    if shards < cost:
+        return f"🔹 Не хватает осколков: нужно {cost}, у тебя {shards}."
+
+    char["shards"] = shards - cost
+    item["quality"] = item.get("quality", 0) + 1
+
+    if item["type"] == "weapon":
+        item["attack_bonus"] = item.get("attack_bonus", 0) + 1
+        stat_name = "атаке"
+    else:
+        item["defense_bonus"] = item.get("defense_bonus", 0) + 1
+        stat_name = "защите"
+
+    q_name = QUALITY_NAMES.get(item["quality"], "—")
+    return (
+        f"⚒ {item['name']} улучшен до {q_name}!\n"
+        f"+1 к {stat_name}. Осталось осколков: {char['shards']} 🔹"
+    )
+
+
 def format_item_line(item: dict) -> str:
     emoji = ITEM_EMOJI.get(item.get("type"), "📦")
     qty = item.get("qty", 1)
@@ -93,16 +139,18 @@ def item_info(item: dict) -> str:
 
     if item.get("type") == "weapon":
         q = item.get("quality", 0)
-        q_names = {0: "обычное", 1: "🟢 зелёное", 2: "🟣 фиолетовое", 3: "🟡 золотое"}
         bonus = item.get("attack_bonus", 0)
-        lines.append(f"Атака: +{bonus}  |  Качество: {q_names.get(q, '—')}")
+        lines.append(f"Атака: +{bonus}  |  Качество: {QUALITY_NAMES.get(q, '—')}")
     elif item.get("type") == "armor":
         q = item.get("quality", 0)
-        q_names = {0: "обычное", 1: "🟢 зелёное", 2: "🟣 фиолетовое", 3: "🟡 золотое"}
         bonus = item.get("defense_bonus", 0)
-        lines.append(f"Защита: +{bonus}  |  Качество: {q_names.get(q, '—')}")
+        lines.append(f"Защита: +{bonus}  |  Качество: {QUALITY_NAMES.get(q, '—')}")
     elif item.get("type") == "potion":
         if item.get("heal"):
             lines.append(f"Восстанавливает: {item['heal']} HP")
+
+    if can_upgrade(item):
+        cost = upgrade_cost(item)
+        lines.append(f"⚒ Следующее улучшение: {cost} 🔹")
 
     return "\n".join(lines)
