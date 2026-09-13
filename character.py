@@ -66,7 +66,7 @@ XP_TO_REACH = {2: 20, 3: 50, 4: 100, 5: 180}
 CHARGES_PER_FIGHT = 2
 
 
-def level_bonus(level: int) -> tuple[int, int, int]:
+def level_bonus(level: int) -> tuple:
     hp_bonus = (level - 1) * 3
     dmg_bonus = (level - 1) * 2
     armor_bonus = 0
@@ -101,13 +101,14 @@ def new_character(name: str, personality: str, cls_key: str) -> dict:
     }
 
 
-def check_level_up(char: dict) -> list[str]:
+def check_level_up(char: dict) -> list:
     msgs = []
     while char.get("level", 1) < MAX_LEVEL:
         next_lvl = char["level"] + 1
         need = XP_TO_REACH[next_lvl]
         if char.get("xp", 0) < need:
             break
+
         char["level"] = next_lvl
         cls = CLASSES.get(char["cls"], CLASSES["warrior"])
         hp_bonus, dmg_bonus, armor_bonus = level_bonus(next_lvl)
@@ -116,6 +117,7 @@ def check_level_up(char: dict) -> list[str]:
         char["hp"] = new_hp_max
         char["dmg_bonus"] = dmg_bonus
         char["armor_bonus"] = armor_bonus
+
         armor_str = f", броня +{armor_bonus}" if armor_bonus else ""
         msgs.append(
             f"🎉 Уровень {next_lvl}! HP {new_hp_max}, урон +{dmg_bonus}{armor_str}"
@@ -130,4 +132,4 @@ def apply_delta(char: dict, delta: dict):
         char["gold"] = max(0, char["gold"] + int(delta["gold_delta"]))
     for key in ("state", "personality", "name"):
         if delta.get(key):
-            char[key] = delta[key] the 
+            char[key] = delta[key]
