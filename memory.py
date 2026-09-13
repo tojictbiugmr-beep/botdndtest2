@@ -75,7 +75,16 @@ def apply_memory(world: dict, mem: dict):
                 "char": data.get("char", ""),
                 "attitude": data.get("attitude", ""),
             }
+# Инвентарь: выдача   
+    from inventory import add_item, remove_item
+    for item in (mem.get("inventory_add") or []):
+    if isinstance(item, dict):
+        add_item(world["character"], item)
+# Инвентарь: забор
+    for name in (mem.get("inventory_remove") or []):
+    remove_item(world["character"], name)
 
+    
     ev = mem.get("event")
     if ev:
         push_event(world, ev.get("what", ""), ev.get("result", ""))
