@@ -26,14 +26,12 @@ async def process_action(world: dict, user_input: str) -> dict:
     push_history(world, "user", user_input)
     push_history(world, "assistant", json.dumps(data, ensure_ascii=False))
 
-    # 1) Проверка от LLM
     if check:
         world["pending"] = {"check": check, "memory": memory, "narrative": narrative}
         return {"type": "check", "text": narrative, "check": check}
 
     apply_memory(world, memory)
 
-    # 2) Бой от LLM
     if start_c and start_c.get("enemies"):
         start_combat(world, start_c["enemies"])
         return {"type": "combat", "text": narrative}
@@ -53,14 +51,16 @@ def resolve_check(world: dict, d20_data: dict) -> dict:
 
     roll = resolve(mod, diff)
     branch_raw = check.get("success" if roll["success"] else "fail")
-if not branch_raw or isinstance(branch_raw, bool):
-    branch = (
-        "Тебе удаётся сделать задуманное."
-        if roll["success"]
-        else "Что-то идёт не так — последствия могут быть тяжёлыми."
-    )
-else:
-    branch = str(branch_raw).strip()
+
+    if not branch_raw or isinstance(branch_raw, bool):
+        branch = (
+            "Тебе удаётся сделать задуманное."
+            if roll["success"]
+            else "Что-то идёт не так — последствия могут быть тяжёлыми."
+        )
+    else:
+        branch = str(branch_raw).strip()
+
     result_text = (
         f"🎲 {stat}: d20={roll['d20']} + {mod} = {roll['total']} vs {diff} "
         f"→ {'УСПЕХ' if roll['success'] else 'ПРОВАЛ'}\n\n{branch}"
