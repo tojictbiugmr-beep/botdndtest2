@@ -61,7 +61,7 @@ def voice_kb() -> InlineKeyboardMarkup:
 
 def combat_kb(world: dict) -> InlineKeyboardMarkup:
     char = world.get("character", {})
-    charges = char.get("charges", 0)
+    charges = char.get("charges") or 0
     skill_name = "Скилл"
     cls = CLASSES.get(char.get("cls"), {})
     if cls and cls.get("skill"):
@@ -229,7 +229,7 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
         result = await engine.process_action(
             world,
             "[Начало игры. Опиши стартовую сцену: где герой, что он видит, "
-            "что происходит вокруг. Завязка сюжета. Дай 3-4 варианта действий.]"
+            "что происходит вокруг. Завязка сюжета. Закончи на крючке.]"
         )
         world["last_narrative"] = result["text"]
         storage.save(cb.from_user.id, world)
@@ -379,11 +379,13 @@ async def cb_inv_use(cb: CallbackQuery):
     result_text = I.use_potion(world["character"], idx)
     in_combat = (world.get("combat") or {}).get("active")
 
-    char = world["character"]
-    push_recent_action(
-        world,
-        f"Использовано «{item_name}». HP сейчас: {char['hp']}/{char['hp_max']}."
-    )
+    # Пишем факт только если зелье реально использовано
+    if "HP:" in result_text:
+        char = world["character"]
+        push_recent_action(
+            world,
+            f"Использовано «{item_name}». HP сейчас: {char['hp']}/{char['hp_max']}."
+        )
 
     if in_combat and not C.combat_over(world):
         enemy_log = C.enemy_turn(world)
