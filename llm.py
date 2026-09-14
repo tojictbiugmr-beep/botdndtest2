@@ -47,8 +47,9 @@ async def ask_master(memory_text: str, history: list, user_input: str) -> dict:
     return _extract_json(content)
 
 
-async def ask_check_result(check: dict, roll: dict, verdict: str, ctx: str) -> str:
-    """Второй запрос — полная сцена после крита или сюжетной проверки."""
+async def ask_check_result(check: dict, roll: dict, verdict: str, ctx: str) -> dict:
+    """Второй запрос — сцена после крита или сюжетной проверки.
+    Возвращает полный dict, как ask_master."""
     prompt = CHECK_RESULT_PROMPT.format(
         reason=check.get("reason", "рискованное действие"),
         stat=check.get("stat", "DEX"),
@@ -72,5 +73,4 @@ async def ask_check_result(check: dict, roll: dict, verdict: str, ctx: str) -> s
         max_tokens=1500,
         response_format={"type": "json_object"},
     )
-    data = _extract_json(resp.choices[0].message.content)
-    return data.get("narrative", "").strip() or "Что-то происходит, но ты не уверен в деталях."
+    return _extract_json(resp.choices[0].message.content)
