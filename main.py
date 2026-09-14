@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -23,6 +24,15 @@ from memory import new_world, push_recent_action
 from character import new_character, CLASSES
 
 logging.basicConfig(level=logging.INFO)
+
+START_VARIANTS = [
+    "Начни сцену с ДЕЙСТВИЯ: герой уже в движении, что-то только что произошло. Завязка сюжета. Закончи на крючке.",
+    "Начни сцену с ДИАЛОГА: кто-то обращается к герою прямо в первой фразе. Завязка сюжета. Закончи на крючке.",
+    "Начни сцену с ОЩУЩЕНИЯ тела: боль, холод, жар, вкус во рту — герой приходит в себя. Завязка сюжета. Закончи на крючке.",
+    "Начни сцену со ЗВУКА: резкий, неожиданный звук ломает тишину. Завязка сюжета. Закончи на крючке.",
+    "Начни сцену с ДЕТАЛИ предмета: герой рассматривает что-то в руках, и это связано с сюжетом. Закончи на крючке.",
+    "Начни сцену в СТРЕМИТЕЛЬНОМ темпе: герой бежит, прячется, уворачивается. Завязка сюжета. Закончи на крючке.",
+]
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -261,10 +271,10 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
     await bot.send_chat_action(cb.message.chat.id, "typing")
 
     try:
+        start_hint = random.choice(START_VARIANTS)
         result = await engine.process_action(
             world,
-            "[Начало игры. Опиши стартовую сцену: где герой, что он видит, "
-            "что происходит вокруг. Завязка сюжета. Закончи на крючке.]"
+            f"[Начало игры. {start_hint}]"
         )
         world["last_narrative"] = result["text"]
         storage.save(cb.from_user.id, world)
