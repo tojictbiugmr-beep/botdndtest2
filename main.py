@@ -341,7 +341,22 @@ async def cb_roll(cb: CallbackQuery):
         await cb.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
-    await cb.message.answer(result["text"], reply_markup=voice_kb())
+
+    if result["type"] == "check":
+        c = result["check"]
+        difficulty = _safe_int(c.get("difficulty", 12), 12)
+        await cb.message.answer(
+            result["text"],
+            reply_markup=roll_kb(c.get("stat", "DEX"), difficulty),
+        )
+    elif result["type"] == "combat":
+        status = C.status_line(world)
+        await cb.message.answer(
+            f"{result['text']}\n\n{status}",
+            reply_markup=combat_kb(world),
+        )
+    else:
+        await cb.message.answer(result["text"], reply_markup=voice_kb())
 
 
 # ---------- Инвентарь ----------
