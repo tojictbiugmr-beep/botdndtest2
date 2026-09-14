@@ -19,7 +19,7 @@ import engine
 import combat as C
 import inventory as I
 import voice
-from memory import new_world
+from memory import new_world, push_recent_action
 from character import new_character, CLASSES
 
 logging.basicConfig(level=logging.INFO)
@@ -243,8 +243,7 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
     except Exception as e:
         logging.exception("LLM start scene error")
         await cb.message.answer(
-            f"⚠️ Мастер задумался на старте. Напиши любое действие, "
-            f"чтобы начать. ({e})"
+            "⚠️ Мастер задумался на старте. Напиши любое действие, чтобы начать."
         )
 
     await cb.answer()
@@ -269,7 +268,7 @@ async def cb_voice(cb: CallbackQuery):
         audio_bytes, truncated = await voice.synthesize(text)
     except Exception as e:
         logging.exception("voice error")
-        await cb.message.answer(f"⚠️ Ошибка озвучки: {e}")
+        await cb.message.answer("⚠️ Ошибка озвучки. Попробуй позже.")
         return
 
     voice_file = BufferedInputFile(audio_bytes, filename="scene.ogg")
@@ -366,8 +365,18 @@ async def cb_inv_use(cb: CallbackQuery):
         await cb.message.answer("Предмет исчез.")
         return
 
+    item_name = inv[idx].get("name", "предмет")
+
     result_text = I.use_potion(world["character"], idx)
     in_combat = (world.get("combat") or {}).get("active")
+
+    # Факт для мастера — в отдельное поле, не в историю диалога
+    char = world["character"]
+    push_recent_action(
+        world,
+        f"Использовано «{item_name}». HP сейчас: "
+        f"{char['hp']}/{char['hp_max']}."
+    )
 
     if in_combat and not C.combat_over(world):
         enemy_log = C.enemy_turn(world)
@@ -404,7 +413,7 @@ async def cb_inv_use(cb: CallbackQuery):
             await cb.message.answer(result["text"], reply_markup=voice_kb())
         except Exception as e:
             logging.exception("LLM after combat")
-            await cb.message.answer(f"(мастер промолчал: {e})")
+            await cb.message.answer("(мастер промолчал)")
         return
 
     world["last_narrative"] = result_text
@@ -491,7 +500,7 @@ async def cb_attack(cb: CallbackQuery):
         logging.exception("combat error")
         world["combat"] = {"active": False, "enemies": [], "log": []}
         storage.save(cb.from_user.id, world)
-        await cb.message.answer(f"⚠️ Ошибка боя: {e}")
+        await cb.message.answer("⚠️ Ошибка боя. Бой сброшен.")
         return
 
     storage.save(cb.from_user.id, world)
@@ -533,7 +542,7 @@ async def cb_skill(cb: CallbackQuery):
         logging.exception("skill error")
         world["combat"] = {"active": False, "enemies": [], "log": []}
         storage.save(cb.from_user.id, world)
-        await cb.message.answer(f"⚠️ Ошибка скилла: {e}")
+        await cb.message.answer("⚠️ Ошибка скилла. Бой сброшен.")
         return
 
     storage.save(cb.from_user.id, world)
@@ -579,7 +588,7 @@ async def _finish_turn(cb: CallbackQuery, world: dict, text: str):
         await cb.message.answer(result["text"], reply_markup=voice_kb())
     except Exception as e:
         logging.exception("LLM after combat")
-        await cb.message.answer(f"(мастер промолчал: {e})")
+        await cb.message.answer("(мастер промолчал)")
 
 
 # ---------- Бой: сдаться ----------
@@ -614,7 +623,7 @@ async def cb_flee(cb: CallbackQuery):
         await cb.message.answer(result["text"], reply_markup=voice_kb())
     except Exception as e:
         logging.exception("LLM after flee")
-        await cb.message.answer(f"(мастер промолчал: {e})")
+        await cb.message.answer("(мастер промолчал)")
 
 
 # ---------- Команда /flee ----------
@@ -639,7 +648,7 @@ async def cmd_flee(m: Message):
         await m.answer(result["text"], reply_markup=voice_kb())
     except Exception as e:
         logging.exception("LLM after flee")
-        await m.answer(f"(мастер промолчал: {e})")
+        await m.answer("(мастер промолчал)")
 
 
 # ---------- Основной цикл ----------
@@ -667,7 +676,7 @@ async def handle(m: Message):
         result = await engine.process_action(world, m.text.strip())
     except Exception as e:
         logging.exception("LLM error")
-        await m.answer(f"⚠️ Мастер задумался. Попробуй ещё раз. ({e})")
+        await m.answer("⚠️ Мастер задумался. Попробуй ещё раз.")
         return
 
     world["last_narrative"] = result["text"]
