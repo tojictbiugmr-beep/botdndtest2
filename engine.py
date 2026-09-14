@@ -62,6 +62,10 @@ async def resolve_check(world: dict) -> dict:
 
     roll = resolve(mod, diff)
 
+    # Подстраховка: если dice.resolve не вернул mod/difficulty — добавим
+    roll["difficulty"] = diff
+    roll["mod"] = mod
+
     crit_success = roll.get("crit_success", False)
     crit_fail = roll.get("crit_fail", False)
     important = bool(check.get("important"))
@@ -87,16 +91,45 @@ async def resolve_check(world: dict) -> dict:
     if need_scene:
         ctx = build_context(world)
         try:
-            scene = await ask_check_result(check, roll, verdict, ctx)
+            data = await ask_check_result(check, roll, verdict, ctx)
         except Exception:
             logging.exception("check result LLM error")
-            branch_raw = check.get("success" if roll["success"] else "fail")
-            scene = str(branch_raw).strip() if branch_raw else (
-                "Тебе удаётся сделать задуманное."
-                if roll["success"]
-                else "Что-то идёт не так — последствия могут быть тяжёлыми."
-            )
-        result_text = f"{roll_line}\n\n{scene}"
+            data = None
+
+        if data:
+            narrative = data.get("narrative", "").strip() or "..."
+            memory = data.get("memory") or {}
+            new_check = data.get("check")
+            new_combat = data.get("start_combat")
+
+            apply_memory(world, memory)
+
+            result_text = f"{roll_line}\n\n{narrative}"
+            push_history(world, "assistant", result_text)
+            world["pending"] = None
+
+            if new_check:
+                world["pending"] = {
+                    "check": new_check,
+                    "memory": {},
+                    "narrative": narrative,
+                }
+                return {"type": "check", "text": result_text, "check": new_check}
+
+            if new_combat and new_combat.get("enemies"):
+                start_combat(world, new_combat["enemies"])
+                return {"type": "combat", "text": result_text}
+
+            return {"type": "text", "text": result_text, "roll": roll}
+
+        # Fallback, если второй запрос упал
+        branch_raw = check.get("success" if roll["success"] else "fail")
+        branch = str(branch_raw).strip() if branch_raw else (
+            "Тебе удаётся сделать задуманное."
+            if roll["success"]
+            else "Что-то идёт не так — последствия могут быть тяжёлыми."
+        )
+        result_text = f"{roll_line}\n\n{branch}"
     else:
         branch_raw = check.get("success" if roll["success"] else "fail")
         if not branch_raw or isinstance(branch_raw, bool):
