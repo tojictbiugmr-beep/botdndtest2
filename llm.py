@@ -19,7 +19,7 @@ def _extract_json(text: str) -> dict:
     return json.loads(text)
 
 
-async def ask_master(memory_text: str, history: list[dict], user_input: str) -> dict:
+async def ask_master(memory_text: str, history: list, user_input: str) -> dict:
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "system", "content": context_block(memory_text)},
@@ -29,7 +29,7 @@ async def ask_master(memory_text: str, history: list[dict], user_input: str) -> 
     resp = await _client.chat.completions.create(
         model=MODEL,
         messages=messages,
-        temperature=1.0,
+        temperature=0.8,
         max_tokens=2000,
         response_format={"type": "json_object"},
     )
