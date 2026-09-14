@@ -10,6 +10,7 @@ from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton,
+    BufferedInputFile,
 )
 
 from config import BOT_TOKEN
@@ -17,6 +18,7 @@ import storage
 import engine
 import combat as C
 import inventory as I
+import voice
 from memory import new_world
 from character import new_character, CLASSES
 
@@ -49,6 +51,12 @@ CLASS_KB = InlineKeyboardMarkup(inline_keyboard=[[
     InlineKeyboardButton(text="🗡 Плут", callback_data="class_rogue"),
     InlineKeyboardButton(text="🔮 Маг", callback_data="class_mage"),
 ]])
+
+
+def voice_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔊 Озвучить", callback_data="voice_play"),
+    ]])
 
 
 def combat_kb(world: dict) -> InlineKeyboardMarkup:
@@ -212,6 +220,7 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
             "[Начало игры. Опиши стартовую сцену: где герой, что он видит, "
             "что происходит вокруг. Завязка сюжета. Дай 3-4 варианта действий.]"
         )
+        world["last_narrative"] = result["text"]
         storage.save(cb.from_user.id, world)
 
         if result["type"] == "check":
@@ -228,7 +237,7 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
                 reply_markup=combat_kb(world),
             )
         else:
-            await cb.message.answer(result["text"])
+            await cb.message.answer(result["text"], reply_markup=voice_kb())
     except Exception as e:
         logging.exception("LLM start scene error")
         await cb.message.answer(
@@ -237,6 +246,36 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
         )
 
     await cb.answer()
+
+
+# ---------- Озвучка ----------
+@dp.callback_query(F.data == "voice_play")
+async def cb_voice(cb: CallbackQuery):
+    await cb.answer("Готовлю озвучку…")
+
+    world = storage.load(cb.from_user.id)
+    if not world:
+        return
+
+    text = world.get("last_narrative")
+    if not text:
+        await cb.message.answer("Нечего озвучивать.")
+        return
+
+    await bot.send_chat_action(cb.message.chat.id, "record_voice")
+    try:
+        audio_bytes, truncated = await voice.synthesize(text)
+    except Exception as e:
+        logging.exception("voice error")
+        await cb.message.answer(f"⚠️ Ошибка озвучки: {e}")
+        return
+
+    voice_file = BufferedInputFile(audio_bytes, filename="scene.ogg")
+    await cb.message.answer_voice(voice_file)
+
+    if truncated:
+        await cb.message.answer("_(текст обрезан — сцена слишком длинная)_",
+                                parse_mode="Markdown")
 
 
 # ---------- Бросок кубика ----------
@@ -248,12 +287,13 @@ async def cb_roll(cb: CallbackQuery):
         await cb.message.answer("Бросать нечего.")
         return
     result = engine.resolve_check(world, {})
+    world["last_narrative"] = result["text"]
     storage.save(cb.from_user.id, world)
     try:
         await cb.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
-    await cb.message.answer(result["text"])
+    await cb.message.answer(result["text"], reply_markup=voice_kb())
 
 
 # ---------- Инвентарь ----------
@@ -350,18 +390,22 @@ async def cb_inv_use(cb: CallbackQuery):
         result_text += f"\n\n✅ {summary}\n❤️ HP восстановлен."
         if level_msgs:
             result_text += "\n\n" + "\n".join(level_msgs)
+        world["last_narrative"] = result_text
         storage.save(cb.from_user.id, world)
         await cb.message.answer(result_text)
         await bot.send_chat_action(cb.message.chat.id, "typing")
         try:
             result = await engine.process_action(world, "[бой окончен, продолжаю]")
+            world["last_narrative"] = result["text"]
             storage.save(cb.from_user.id, world)
-            await cb.message.answer(result["text"])
+            await cb.message.answer(result["text"], reply_markup=voice_kb())
         except Exception as e:
             logging.exception("LLM after combat")
             await cb.message.answer(f"(мастер промолчал: {e})")
         return
 
+    world["last_narrative"] = result_text
+    storage.save(cb.from_user.id, world)
     await cb.message.answer(result_text, reply_markup=INVENTORY_KB)
 
 
@@ -511,6 +555,7 @@ async def _finish_turn(cb: CallbackQuery, world: dict, text: str):
     if world["character"]["hp"] <= 0:
         text += "\n\n☠️ Ты повержен. Напиши /start, чтобы начать заново."
         C.end_combat(world)
+        world["last_narrative"] = text
         storage.save(cb.from_user.id, world)
         await cb.message.answer(text)
         return
@@ -519,14 +564,16 @@ async def _finish_turn(cb: CallbackQuery, world: dict, text: str):
     text += f"\n\n✅ {summary}\n❤️ HP восстановлен."
     if level_msgs:
         text += "\n\n" + "\n".join(level_msgs)
+    world["last_narrative"] = text
     storage.save(cb.from_user.id, world)
     await cb.message.answer(text)
 
     await bot.send_chat_action(cb.message.chat.id, "typing")
     try:
         result = await engine.process_action(world, "[бой окончен, продолжаю]")
+        world["last_narrative"] = result["text"]
         storage.save(cb.from_user.id, world)
-        await cb.message.answer(result["text"])
+        await cb.message.answer(result["text"], reply_markup=voice_kb())
     except Exception as e:
         logging.exception("LLM after combat")
         await cb.message.answer(f"(мастер промолчал: {e})")
@@ -559,8 +606,9 @@ async def cb_flee(cb: CallbackQuery):
             "[Игрок сбежал из боя. Опиши последствия отступления: куда он "
             "бежит, что происходит вокруг, кто преследует. Продолжи сюжет.]"
         )
+        world["last_narrative"] = result["text"]
         storage.save(cb.from_user.id, world)
-        await cb.message.answer(result["text"])
+        await cb.message.answer(result["text"], reply_markup=voice_kb())
     except Exception as e:
         logging.exception("LLM after flee")
         await cb.message.answer(f"(мастер промолчал: {e})")
@@ -583,8 +631,9 @@ async def cmd_flee(m: Message):
             world,
             "[Игрок сбежал из боя. Опиши последствия отступления, продолжи сюжет.]"
         )
+        world["last_narrative"] = result["text"]
         storage.save(m.from_user.id, world)
-        await m.answer(result["text"])
+        await m.answer(result["text"], reply_markup=voice_kb())
     except Exception as e:
         logging.exception("LLM after flee")
         await m.answer(f"(мастер промолчал: {e})")
@@ -618,6 +667,7 @@ async def handle(m: Message):
         await m.answer(f"⚠️ Мастер задумался. Попробуй ещё раз. ({e})")
         return
 
+    world["last_narrative"] = result["text"]
     storage.save(m.from_user.id, world)
 
     if result["type"] == "check":
@@ -634,7 +684,7 @@ async def handle(m: Message):
             reply_markup=combat_kb(world),
         )
     else:
-        await m.answer(result["text"])
+        await m.answer(result["text"], reply_markup=voice_kb())
 
 
 # ---------- Запуск ----------
