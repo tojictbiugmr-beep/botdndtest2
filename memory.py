@@ -2,6 +2,8 @@ from config import MAX_EVENTS, EVENTS_CTX, MAX_HISTORY
 from character import CLASSES, apply_delta
 from inventory import add_item, remove_item
 
+MAX_RECENT_ACTIONS = 5
+
 
 def new_world(user_id: int) -> dict:
     return {
@@ -20,6 +22,7 @@ def new_world(user_id: int) -> dict:
         "history": [],
         "pending": None,
         "combat": {"active": False, "enemies": [], "log": []},
+        "recent_actions": [],
     }
 
 
@@ -36,6 +39,20 @@ def push_history(world: dict, role: str, content: str):
     world["history"].append({"role": role, "content": content})
     if len(world["history"]) > MAX_HISTORY:
         world["history"] = world["history"][-MAX_HISTORY:]
+
+
+def push_recent_action(world: dict, text: str):
+    """Факт действия через интерфейс (инвентарь и т.п.). Показывается мастеру 1-2 хода."""
+    if not text:
+        return
+    world.setdefault("recent_actions", []).append(text)
+    if len(world["recent_actions"]) > MAX_RECENT_ACTIONS:
+        world["recent_actions"] = world["recent_actions"][-MAX_RECENT_ACTIONS:]
+
+
+def clear_recent_actions(world: dict):
+    """Вызывается после ответа мастера — он уже увидел факты."""
+    world["recent_actions"] = []
 
 
 def _safe_int(value, default: int = 0) -> int:
@@ -79,12 +96,10 @@ def apply_memory(world: dict, mem: dict):
                 "attitude": data.get("attitude", ""),
             }
 
-    # Инвентарь: выдача
     for item in (mem.get("inventory_add") or []):
         if isinstance(item, dict):
             add_item(world["character"], item)
 
-    # Инвентарь: забор
     for name in (mem.get("inventory_remove") or []):
         if isinstance(name, str):
             remove_item(world["character"], name)
@@ -95,10 +110,6 @@ def apply_memory(world: dict, mem: dict):
 
 
 def build_context(world: dict) -> str:
-    """
-    Контекст для мастера. Память мастера ≠ знания NPC.
-    Явно помечаем разделы, чтобы LLM не давала NPC недоступную информацию.
-    """
     lines = []
 
     lines.append("=== ПАМЯТЬ МАСТЕРА (не знания NPC) ===")
@@ -126,6 +137,14 @@ def build_context(world: dict) -> str:
             qty_str = f" ×{qty}" if qty > 1 else ""
             desc = f" — {it['desc']}" if it.get("desc") else ""
             lines.append(f"  • {it['name']}{qty_str}{desc}")
+
+    # Факты действий через интерфейс (использование зелий и т.п.)
+    recent = world.get("recent_actions") or []
+    if recent:
+        lines.append("")
+        lines.append("ПОСЛЕДНИЕ ДЕЙСТВИЯ ЧЕРЕЗ ИНТЕРФЕЙС (уже выполнено кодом):")
+        for act in recent:
+            lines.append(f"  • {act}")
 
     if world["npcs"]:
         lines.append("")
