@@ -331,9 +331,12 @@ async def cb_roll(cb: CallbackQuery):
     if not world or not world.get("pending"):
         await cb.message.answer("Бросать нечего.")
         return
-    result = engine.resolve_check(world)
+
+    await bot.send_chat_action(cb.message.chat.id, "typing")
+    result = await engine.resolve_check(world)
     world["last_narrative"] = result["text"]
     storage.save(cb.from_user.id, world)
+
     try:
         await cb.message.edit_reply_markup(reply_markup=None)
     except Exception:
@@ -717,7 +720,6 @@ async def handle(m: Message):
         await m.answer("Начни с /start")
         return
 
-    # Фильтр промпт-инъекций
     if looks_like_injection(m.text):
         await m.answer(
             "Мастер не отвечает на такие просьбы. Опиши, что делает персонаж."
