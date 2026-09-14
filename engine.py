@@ -1,6 +1,11 @@
 import json
 from llm import ask_master
-from memory import build_context, apply_memory, push_history
+from memory import (
+    build_context,
+    apply_memory,
+    push_history,
+    clear_recent_actions,
+)
 from dice import resolve
 from combat import start_combat
 
@@ -25,25 +30,26 @@ async def process_action(world: dict, user_input: str) -> dict:
 
     push_history(world, "user", user_input)
 
-    # В историю пишем только narrative и memory — без check/success/fail,
-    # чтобы модель не копировала английский из своих старых ответов
     short = {"narrative": narrative, "memory": memory}
     push_history(world, "assistant", json.dumps(short, ensure_ascii=False))
 
     if check:
         world["pending"] = {"check": check, "memory": memory, "narrative": narrative}
+        clear_recent_actions(world)
         return {"type": "check", "text": narrative, "check": check}
 
     apply_memory(world, memory)
 
     if start_c and start_c.get("enemies"):
         start_combat(world, start_c["enemies"])
+        clear_recent_actions(world)
         return {"type": "combat", "text": narrative}
 
+    clear_recent_actions(world)
     return {"type": "text", "text": narrative}
 
 
-def resolve_check(world: dict, d20_data: dict) -> dict:
+def resolve_check(world: dict) -> dict:
     pending = world.get("pending")
     if not pending:
         return {"type": "text", "text": "Нечего бросать."}
@@ -54,8 +60,17 @@ def resolve_check(world: dict, d20_data: dict) -> dict:
     mod = _safe_int(world["character"]["stats"].get(stat, 0), 0)
 
     roll = resolve(mod, diff)
-    branch_raw = check.get("success" if roll["success"] else "fail")
 
+    if roll.get("crit_success"):
+        verdict = "КРИТ. УСПЕХ"
+    elif roll.get("crit_fail"):
+        verdict = "КРИТ. ПРОВАЛ"
+    elif roll["success"]:
+        verdict = "УСПЕХ"
+    else:
+        verdict = "ПРОВАЛ"
+
+    branch_raw = check.get("success" if roll["success"] else "fail")
     if not branch_raw or isinstance(branch_raw, bool):
         branch = (
             "Тебе удаётся сделать задуманное."
@@ -67,15 +82,14 @@ def resolve_check(world: dict, d20_data: dict) -> dict:
 
     result_text = (
         f"🎲 {stat}: d20={roll['d20']} + {mod} = {roll['total']} vs {diff} "
-        f"→ {'УСПЕХ' if roll['success'] else 'ПРОВАЛ'}\n\n{branch}"
+        f"→ {verdict}\n\n{branch}"
     )
 
     apply_memory(world, pending["memory"])
-    push_history(
-        world, "user",
-        f"[бросок {stat}: {roll['total']} vs {diff} — "
-        f"{'успех' if roll['success'] else 'провал'}]"
-    )
+
+    # Пишем результат броска в историю как ответ мастера,
+    # чтобы LLM на следующем ходу видела, что именно было сказано
+    push_history(world, "assistant", result_text)
 
     world["pending"] = None
     return {"type": "text", "text": result_text, "roll": roll}
