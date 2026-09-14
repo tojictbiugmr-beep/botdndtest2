@@ -2,7 +2,7 @@ import json
 import logging
 from openai import AsyncOpenAI
 from config import GROQ_KEY, GROQ_URL, MODEL
-from prompts import SYSTEM_PROMPT, context_block
+from prompts import SYSTEM_PROMPT, context_block, CHECK_RESULT_PROMPT
 
 _client = AsyncOpenAI(api_key=GROQ_KEY, base_url=GROQ_URL)
 
@@ -37,7 +37,7 @@ async def ask_master(memory_text: str, history: list, user_input: str) -> dict:
         model=MODEL,
         messages=messages,
         temperature=0.8,
-        max_tokens=2000,
+        max_tokens=1500,
         response_format={"type": "json_object"},
     )
     content = resp.choices[0].message.content
@@ -45,3 +45,32 @@ async def ask_master(memory_text: str, history: list, user_input: str) -> dict:
     if finish == "length":
         logging.warning("LLM hit max_tokens — ответ обрезан")
     return _extract_json(content)
+
+
+async def ask_check_result(check: dict, roll: dict, verdict: str, ctx: str) -> str:
+    """Второй запрос — полная сцена после крита или сюжетной проверки."""
+    prompt = CHECK_RESULT_PROMPT.format(
+        reason=check.get("reason", "рискованное действие"),
+        stat=check.get("stat", "DEX"),
+        difficulty=roll.get("difficulty", 12),
+        d20=roll.get("d20", 0),
+        mod=roll.get("mod", 0),
+        total=roll.get("total", 0),
+        verdict=verdict,
+    )
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": context_block(ctx)},
+        {"role": "user", "content": prompt},
+    ]
+
+    resp = await _client.chat.completions.create(
+        model=MODEL,
+        messages=messages,
+        temperature=0.85,
+        max_tokens=1500,
+        response_format={"type": "json_object"},
+    )
+    data = _extract_json(resp.choices[0].message.content)
+    return data.get("narrative", "").strip() or "Что-то происходит, но ты не уверен в деталях."
