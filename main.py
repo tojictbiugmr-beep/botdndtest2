@@ -52,11 +52,11 @@ CLASS_KB = InlineKeyboardMarkup(inline_keyboard=[[
     InlineKeyboardButton(text="🔮 Маг", callback_data="class_mage"),
 ]])
 
+VOICE_BTN = InlineKeyboardButton(text="🔊 Озвучить", callback_data="voice_play")
+
 
 def voice_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🔊 Озвучить", callback_data="voice_play"),
-    ]])
+    return InlineKeyboardMarkup(inline_keyboard=[[VOICE_BTN]])
 
 
 def combat_kb(world: dict) -> InlineKeyboardMarkup:
@@ -71,16 +71,18 @@ def combat_kb(world: dict) -> InlineKeyboardMarkup:
          InlineKeyboardButton(text=f"🌀 {skill_name} ({charges})",
                               callback_data="combat_skill")],
         [InlineKeyboardButton(text="🏳 Сдаться", callback_data="combat_flee")],
+        [VOICE_BTN],
     ])
 
 
 def roll_kb(stat: str, difficulty: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
             text=f"🎲 Бросок {stat} (сл. {difficulty})",
             callback_data="roll",
-        )
-    ]])
+        )],
+        [VOICE_BTN],
+    ])
 
 
 def inventory_kb(world: dict) -> InlineKeyboardMarkup:
@@ -383,6 +385,7 @@ async def cb_inv_use(cb: CallbackQuery):
         if world["character"]["hp"] <= 0:
             result_text += "\n\n☠️ Ты повержен. Напиши /start, чтобы начать заново."
             C.end_combat(world)
+            world["last_narrative"] = result_text
             storage.save(cb.from_user.id, world)
             await cb.message.answer(result_text)
             return
