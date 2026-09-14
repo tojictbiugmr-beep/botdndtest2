@@ -156,6 +156,9 @@ async def cb_restart(cb: CallbackQuery, state: FSMContext):
 # ---------- Создание персонажа ----------
 @dp.message(Setup.setting, F.text)
 async def setup_setting(m: Message, state: FSMContext):
+    if m.text == "🎒 Инвентарь":
+        await m.answer("Сначала закончим создание персонажа.")
+        return
     await state.update_data(setting=m.text.strip())
     await m.answer("Как зовут твоего персонажа?")
     await state.set_state(Setup.name)
@@ -163,6 +166,9 @@ async def setup_setting(m: Message, state: FSMContext):
 
 @dp.message(Setup.name, F.text)
 async def setup_name(m: Message, state: FSMContext):
+    if m.text == "🎒 Инвентарь":
+        await m.answer("Сначала закончим создание персонажа.")
+        return
     await state.update_data(name=m.text.strip())
     await m.answer(
         "Расскажи коротко о своём персонаже — кто он, откуда, как выглядит, "
@@ -175,6 +181,9 @@ async def setup_name(m: Message, state: FSMContext):
 
 @dp.message(Setup.personality, F.text)
 async def setup_personality(m: Message, state: FSMContext):
+    if m.text == "🎒 Инвентарь":
+        await m.answer("Сначала закончим создание персонажа.")
+        return
     await state.update_data(personality=m.text.strip())
     await m.answer("Выбери **класс**:", reply_markup=CLASS_KB)
 
@@ -287,7 +296,7 @@ async def cb_roll(cb: CallbackQuery):
     if not world or not world.get("pending"):
         await cb.message.answer("Бросать нечего.")
         return
-    result = engine.resolve_check(world, {})
+    result = engine.resolve_check(world)
     world["last_narrative"] = result["text"]
     storage.save(cb.from_user.id, world)
     try:
@@ -370,12 +379,10 @@ async def cb_inv_use(cb: CallbackQuery):
     result_text = I.use_potion(world["character"], idx)
     in_combat = (world.get("combat") or {}).get("active")
 
-    # Факт для мастера — в отдельное поле, не в историю диалога
     char = world["character"]
     push_recent_action(
         world,
-        f"Использовано «{item_name}». HP сейчас: "
-        f"{char['hp']}/{char['hp_max']}."
+        f"Использовано «{item_name}». HP сейчас: {char['hp']}/{char['hp_max']}."
     )
 
     if in_combat and not C.combat_over(world):
@@ -667,7 +674,12 @@ async def handle(m: Message):
         return
 
     if world.get("pending"):
-        await m.answer("Сначала брось кубик ☝️")
+        c = world["pending"]["check"]
+        difficulty = _safe_int(c.get("difficulty", 12), 12)
+        await m.answer(
+            "Сначала брось кубик ☝️",
+            reply_markup=roll_kb(c.get("stat", "DEX"), difficulty),
+        )
         return
 
     await bot.send_chat_action(m.chat.id, "typing")
