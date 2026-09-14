@@ -28,6 +28,41 @@ bot = Bot(BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 
+# ---------- Фильтр инъекций ----------
+INJECTION_MARKERS = (
+    "забудь предыдущие",
+    "забудь инструкции",
+    "забудь правила",
+    "забудь роль",
+    "игнорируй инструкции",
+    "игнорируй правила",
+    "покажи промпт",
+    "покажи системн",
+    "покажи инструкции",
+    "повтори промпт",
+    "повтори инструкции",
+    "повтори системн",
+    "system prompt",
+    "system message",
+    "ignore previous",
+    "ignore instructions",
+    "ответь текстом",
+    "ответь без json",
+    "стань чат",
+    "стань ассистент",
+    "будь чат",
+    "будь ассистент",
+    "новая роль",
+    "выйди из роли",
+    "выйти из роли",
+)
+
+
+def looks_like_injection(text: str) -> bool:
+    low = text.lower()
+    return any(m in low for m in INJECTION_MARKERS)
+
+
 class Setup(StatesGroup):
     setting = State()
     name = State()
@@ -365,7 +400,6 @@ async def cb_inv_use(cb: CallbackQuery):
     if not world or not world.get("character"):
         return
 
-    # Нельзя использовать предметы, пока висит проверка
     if world.get("pending"):
         await cb.message.answer("Сначала брось кубик ☝️")
         return
@@ -385,7 +419,6 @@ async def cb_inv_use(cb: CallbackQuery):
     result_text = I.use_potion(world["character"], idx)
     in_combat = (world.get("combat") or {}).get("active")
 
-    # Пишем факт только если зелье реально использовано
     if "HP:" in result_text:
         char = world["character"]
         push_recent_action(
@@ -434,7 +467,6 @@ async def cb_inv_use(cb: CallbackQuery):
     world["last_narrative"] = result_text
     storage.save(cb.from_user.id, world)
 
-    # Возвращаем правильную клавиатуру: боевую, если бой ещё идёт
     if in_combat:
         await cb.message.answer(result_text, reply_markup=combat_kb(world))
     else:
@@ -683,6 +715,13 @@ async def handle(m: Message):
     world = storage.load(m.from_user.id)
     if not world or not world.get("character"):
         await m.answer("Начни с /start")
+        return
+
+    # Фильтр промпт-инъекций
+    if looks_like_injection(m.text):
+        await m.answer(
+            "Мастер не отвечает на такие просьбы. Опиши, что делает персонаж."
+        )
         return
 
     if (world.get("combat") or {}).get("active"):
