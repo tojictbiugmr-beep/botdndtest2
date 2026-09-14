@@ -36,7 +36,7 @@ async def ask_master(memory_text: str, history: list, user_input: str) -> dict:
     resp = await _client.chat.completions.create(
         model=MODEL,
         messages=messages,
-        temperature=0.8,
+        temperature=0.95,
         max_tokens=1500,
         response_format={"type": "json_object"},
     )
@@ -69,7 +69,7 @@ async def ask_check_result(check: dict, roll: dict, verdict: str, ctx: str) -> d
     resp = await _client.chat.completions.create(
         model=MODEL,
         messages=messages,
-        temperature=0.85,
+        temperature=1,
         max_tokens=1500,
         response_format={"type": "json_object"},
     )
