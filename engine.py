@@ -52,8 +52,15 @@ def resolve_check(world: dict, d20_data: dict) -> dict:
     mod = _safe_int(world["character"]["stats"].get(stat, 0), 0)
 
     roll = resolve(mod, diff)
-    branch = check.get("success" if roll["success"] else "fail", "")
-
+    branch_raw = check.get("success" if roll["success"] else "fail")
+if not branch_raw or isinstance(branch_raw, bool):
+    branch = (
+        "Тебе удаётся сделать задуманное."
+        if roll["success"]
+        else "Что-то идёт не так — последствия могут быть тяжёлыми."
+    )
+else:
+    branch = str(branch_raw).strip()
     result_text = (
         f"🎲 {stat}: d20={roll['d20']} + {mod} = {roll['total']} vs {diff} "
         f"→ {'УСПЕХ' if roll['success'] else 'ПРОВАЛ'}\n\n{branch}"
