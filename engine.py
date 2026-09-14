@@ -1,5 +1,6 @@
 import json
-from llm import ask_master
+import logging
+from llm import ask_master, ask_check_result
 from memory import (
     build_context,
     apply_memory,
@@ -49,7 +50,7 @@ async def process_action(world: dict, user_input: str) -> dict:
     return {"type": "text", "text": narrative}
 
 
-def resolve_check(world: dict) -> dict:
+async def resolve_check(world: dict) -> dict:
     pending = world.get("pending")
     if not pending:
         return {"type": "text", "text": "Нечего бросать."}
@@ -61,35 +62,53 @@ def resolve_check(world: dict) -> dict:
 
     roll = resolve(mod, diff)
 
-    if roll.get("crit_success"):
+    crit_success = roll.get("crit_success", False)
+    crit_fail = roll.get("crit_fail", False)
+    important = bool(check.get("important"))
+
+    if crit_success:
         verdict = "КРИТ. УСПЕХ"
-    elif roll.get("crit_fail"):
+    elif crit_fail:
         verdict = "КРИТ. ПРОВАЛ"
     elif roll["success"]:
         verdict = "УСПЕХ"
     else:
         verdict = "ПРОВАЛ"
 
-    branch_raw = check.get("success" if roll["success"] else "fail")
-    if not branch_raw or isinstance(branch_raw, bool):
-        branch = (
-            "Тебе удаётся сделать задуманное."
-            if roll["success"]
-            else "Что-то идёт не так — последствия могут быть тяжёлыми."
-        )
-    else:
-        branch = str(branch_raw).strip()
-
-    result_text = (
+    roll_line = (
         f"🎲 {stat}: d20={roll['d20']} + {mod} = {roll['total']} vs {diff} "
-        f"→ {verdict}\n\n{branch}"
+        f"→ {verdict}"
     )
 
     apply_memory(world, pending["memory"])
 
-    # Пишем результат броска в историю как ответ мастера,
-    # чтобы LLM на следующем ходу видела, что именно было сказано
-    push_history(world, "assistant", result_text)
+    need_scene = crit_success or crit_fail or important
 
+    if need_scene:
+        ctx = build_context(world)
+        try:
+            scene = await ask_check_result(check, roll, verdict, ctx)
+        except Exception:
+            logging.exception("check result LLM error")
+            branch_raw = check.get("success" if roll["success"] else "fail")
+            scene = str(branch_raw).strip() if branch_raw else (
+                "Тебе удаётся сделать задуманное."
+                if roll["success"]
+                else "Что-то идёт не так — последствия могут быть тяжёлыми."
+            )
+        result_text = f"{roll_line}\n\n{scene}"
+    else:
+        branch_raw = check.get("success" if roll["success"] else "fail")
+        if not branch_raw or isinstance(branch_raw, bool):
+            branch = (
+                "Тебе удаётся сделать задуманное."
+                if roll["success"]
+                else "Что-то идёт не так — последствия могут быть тяжёлыми."
+            )
+        else:
+            branch = str(branch_raw).strip()
+        result_text = f"{roll_line}\n\n{branch}"
+
+    push_history(world, "assistant", result_text)
     world["pending"] = None
     return {"type": "text", "text": result_text, "roll": roll}
