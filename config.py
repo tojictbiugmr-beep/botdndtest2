@@ -9,3 +9,5 @@ DATA_DIR    = os.getenv("DATA_DIR", "data")
 MAX_EVENTS   = 20      # активных событий
 EVENTS_CTX   = 5       # сколько отдаём в LLM
 MAX_HISTORY  = 10      # сообщений истории в контексте
+YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
+YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
