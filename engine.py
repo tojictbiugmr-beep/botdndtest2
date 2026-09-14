@@ -24,7 +24,11 @@ async def process_action(world: dict, user_input: str) -> dict:
     start_c = data.get("start_combat")
 
     push_history(world, "user", user_input)
-    push_history(world, "assistant", json.dumps(data, ensure_ascii=False))
+
+    # В историю пишем только narrative и memory — без check/success/fail,
+    # чтобы модель не копировала английский из своих старых ответов
+    short = {"narrative": narrative, "memory": memory}
+    push_history(world, "assistant", json.dumps(short, ensure_ascii=False))
 
     if check:
         world["pending"] = {"check": check, "memory": memory, "narrative": narrative}
