@@ -329,7 +329,7 @@ async def btn_inventory(m: Message):
 async def cb_inv_open(cb: CallbackQuery):
     await cb.answer()
     world = storage.load(cb.from_user.id)
-    if not world:
+    if not world or not world.get("character"):
         return
     inv = world["character"].get("inventory", [])
     shards = world["character"].get("shards", 0)
@@ -362,8 +362,14 @@ async def cb_inv_close(cb: CallbackQuery):
 async def cb_inv_use(cb: CallbackQuery):
     await cb.answer()
     world = storage.load(cb.from_user.id)
-    if not world:
+    if not world or not world.get("character"):
         return
+
+    # Нельзя использовать предметы, пока висит проверка
+    if world.get("pending"):
+        await cb.message.answer("Сначала брось кубик ☝️")
+        return
+
     try:
         idx = int(cb.data.replace("inv_use_", ""))
     except ValueError:
@@ -427,14 +433,19 @@ async def cb_inv_use(cb: CallbackQuery):
 
     world["last_narrative"] = result_text
     storage.save(cb.from_user.id, world)
-    await cb.message.answer(result_text, reply_markup=INVENTORY_KB)
+
+    # Возвращаем правильную клавиатуру: боевую, если бой ещё идёт
+    if in_combat:
+        await cb.message.answer(result_text, reply_markup=combat_kb(world))
+    else:
+        await cb.message.answer(result_text, reply_markup=INVENTORY_KB)
 
 
 @dp.callback_query(F.data.startswith("inv_upgrade_"))
 async def cb_inv_upgrade(cb: CallbackQuery):
     await cb.answer()
     world = storage.load(cb.from_user.id)
-    if not world:
+    if not world or not world.get("character"):
         return
     try:
         idx = int(cb.data.replace("inv_upgrade_", ""))
@@ -471,7 +482,7 @@ async def cb_inv_item(cb: CallbackQuery):
 
     await cb.answer()
     world = storage.load(cb.from_user.id)
-    if not world:
+    if not world or not world.get("character"):
         return
     inv = world["character"].get("inventory", [])
     if idx < 0 or idx >= len(inv):
@@ -507,7 +518,10 @@ async def cb_attack(cb: CallbackQuery):
                 lines.append(enemy_log)
     except Exception as e:
         logging.exception("combat error")
-        world["combat"] = {"active": False, "enemies": [], "log": []}
+        try:
+            C.end_combat(world)
+        except Exception:
+            world["combat"] = {"active": False, "enemies": [], "log": []}
         storage.save(cb.from_user.id, world)
         await cb.message.answer("⚠️ Ошибка боя. Бой сброшен.")
         return
@@ -549,7 +563,10 @@ async def cb_skill(cb: CallbackQuery):
                 lines.append(enemy_log)
     except Exception as e:
         logging.exception("skill error")
-        world["combat"] = {"active": False, "enemies": [], "log": []}
+        try:
+            C.end_combat(world)
+        except Exception:
+            world["combat"] = {"active": False, "enemies": [], "log": []}
         storage.save(cb.from_user.id, world)
         await cb.message.answer("⚠️ Ошибка скилла. Бой сброшен.")
         return
@@ -676,7 +693,7 @@ async def handle(m: Message):
         return
 
     if world.get("pending"):
-        c = world["pending"]["check"]
+        c = world["pending"].get("check") or {}
         difficulty = _safe_int(c.get("difficulty", 12), 12)
         await m.answer(
             "Сначала брось кубик ☝️",
