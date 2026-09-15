@@ -183,6 +183,8 @@ def build_context(world: dict) -> str:
                 lines.append(f"  • Страхи: {p['fears']}")
             if p.get("motivation"):
                 lines.append(f"  • Мотив: {p['motivation']}")
+            if p.get("conflict"):
+                lines.append(f"  • Внутренний конфликт: {p['conflict']}")
             if p.get("notes"):
                 lines.append(f"  • Доп.: {p['notes']}")
         else:
