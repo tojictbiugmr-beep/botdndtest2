@@ -37,31 +37,45 @@ def _get_prev_narratives(history: list, n: int = 3) -> list:
 
 
 def _anti_repeat(text: str, history: list) -> str:
-    """Срезает предложения, дублирующие прошлые ответы."""
+    """Срезает предложения, дублирующие прошлые ответы. Сохраняет абзацы."""
     if not text or not history:
         return text
+
+    # Литеральные \n → настоящие переносы (модель иногда так возвращает)
+    text = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+
     prev = _get_prev_narratives(history, n=3)
     if not prev:
         return text
 
-    sents = re.split(r'(?<=[.!?…])\s+', text.strip())
-    filtered = []
-    for s in sents:
-        if not s:
-            continue
-        dup = False
-        if len(s) > 30:
-            head = s[:40].lower()
-            for p in prev:
-                if head in p.lower():
-                    dup = True
-                    break
-        if not dup:
-            filtered.append(s)
+    paragraphs = text.split("\n\n")
+    out_paras = []
 
-    if not filtered:
+    for p in paragraphs:
+        p = p.strip()
+        if not p:
+            continue
+        sents = re.split(r'(?<=[.!?…])\s+', p)
+        kept = []
+        for s in sents:
+            s = s.strip()
+            if not s:
+                continue
+            if len(s) > 30:
+                head = s[:40].lower()
+                if any(head in pv.lower() for pv in prev):
+                    continue
+            kept.append(s)
+        if kept:
+            out_paras.append(" ".join(kept))
+        else:
+            # Если все предложения абзаца — дубли, оставляем его целиком
+            out_paras.append(p)
+
+    if not out_paras:
         return text
-    return " ".join(filtered)
+
+    return "\n\n".join(out_paras)
 
 
 def _update_epilogue(world: dict):
@@ -92,7 +106,7 @@ async def process_action(world: dict, user_input: str) -> dict:
     # При check narrative пустая — не подставляем "..."
     narrative = narrative_raw or ("" if check else "...")
 
-    # Анти-повтор: срезаем дубли из прошлых ответов
+    # Анти-повтор: срезаем дубли из прошлых ответов + сохраняем абзацы
     if narrative:
         narrative = _anti_repeat(narrative, world["history"])
 
