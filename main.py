@@ -20,7 +20,7 @@ import combat as C
 import inventory as I
 import voice
 from memory import new_world, push_recent_action
-from character import new_character, CLASSES
+from character import new_character, new_personality, CLASSES, ARCHETYPES
 
 logging.basicConfig(level=logging.INFO)
 
@@ -65,8 +65,16 @@ def looks_like_injection(text: str) -> bool:
 
 class Setup(StatesGroup):
     setting = State()
+    tone_custom = State()
+    world_desc = State()
     name = State()
-    personality = State()
+    archetype = State()
+    custom_habits = State()
+    custom_manner = State()
+    custom_fears = State()
+    custom_motivation = State()
+    extra_notes = State()
+    class_choice = State()
 
 
 # ---------- Клавиатуры ----------
@@ -85,6 +93,45 @@ CLASS_KB = InlineKeyboardMarkup(inline_keyboard=[[
     InlineKeyboardButton(text="⚔️ Воин", callback_data="class_warrior"),
     InlineKeyboardButton(text="🗡 Плут", callback_data="class_rogue"),
     InlineKeyboardButton(text="🔮 Маг", callback_data="class_mage"),
+]])
+
+TONES = {
+    "dark": "Тёмное фэнтези",
+    "noir": "Мрачный нуар",
+    "epic": "Эпическое героическое",
+    "fairy": "Сказочное и лёгкое",
+    "horror": "Хоррор",
+}
+
+TONE_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="🌑 Тёмное фэнтези", callback_data="tone_dark"),
+     InlineKeyboardButton(text="🕵️ Мрачный нуар", callback_data="tone_noir")],
+    [InlineKeyboardButton(text="⚔️ Эпическое", callback_data="tone_epic"),
+     InlineKeyboardButton(text="🧚 Сказочное", callback_data="tone_fairy")],
+    [InlineKeyboardButton(text="👁 Хоррор", callback_data="tone_horror"),
+     InlineKeyboardButton(text="✍️ Своё", callback_data="tone_custom")],
+])
+
+SKIP_DESC_KB = InlineKeyboardMarkup(inline_keyboard=[[
+    InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_world_desc"),
+]])
+
+ARCHETYPE_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="🌲 Отшельник", callback_data="arch_view_hermit"),
+     InlineKeyboardButton(text="🏃 Беглец", callback_data="arch_view_fugitive")],
+    [InlineKeyboardButton(text="⚔️ Авантюрист", callback_data="arch_view_adventurer"),
+     InlineKeyboardButton(text="🗡️ Мститель", callback_data="arch_view_avenger")],
+    [InlineKeyboardButton(text="📜 Искатель", callback_data="arch_view_seeker"),
+     InlineKeyboardButton(text="🌹 Романтик", callback_data="arch_view_romantic")],
+    [InlineKeyboardButton(text="🛡️ Солдат", callback_data="arch_view_soldier"),
+     InlineKeyboardButton(text="🎭 Шут", callback_data="arch_view_jester")],
+    [InlineKeyboardButton(text="✍️ Свой", callback_data="arch_custom"),
+     InlineKeyboardButton(text="⏭ Пропустить", callback_data="arch_skip")],
+])
+
+NOTES_KB = InlineKeyboardMarkup(inline_keyboard=[[
+    InlineKeyboardButton(text="✍️ Добавить", callback_data="notes_add"),
+    InlineKeyboardButton(text="⏭ Пропустить", callback_data="notes_skip"),
 ]])
 
 VOICE_BTN = InlineKeyboardButton(text="🔊 Озвучить", callback_data="voice_play")
@@ -159,7 +206,6 @@ def _safe_int(value, default: int) -> int:
 
 
 def _with_epilogue(world: dict, text: str) -> str:
-    """Добавляет счётчик эпилога или пометку о завершении."""
     w = world.get("world", {})
     if w.get("final_reached"):
         return text + "\n\n🏁 **История завершена.** Напиши /start, чтобы начать новую."
@@ -167,6 +213,58 @@ def _with_epilogue(world: dict, text: str) -> str:
     if epilogue > 0:
         return text + f"\n\n⏳ Эпилог: осталось {epilogue} ходов."
     return text
+
+
+# ---------- Хелперы создания персонажа ----------
+async def _ask_tone(target: Message, state: FSMContext):
+    await target.answer("Выбери **тон** повествования:", reply_markup=TONE_KB)
+    await state.set_state(Setup.tone_custom)  # перезапишется в cb_tone
+
+
+async def _ask_world_desc(target: Message, state: FSMContext):
+    await target.answer(
+        "Опиши **мир** (до 500 символов) — регионы, ключевые факты, что важно "
+        "знать. Мастер будет на это опираться.\n\n"
+        "Или пропусти — мастер придумает сам.",
+        reply_markup=SKIP_DESC_KB,
+    )
+    await state.set_state(Setup.world_desc)
+
+
+async def _ask_name(target: Message, state: FSMContext):
+    await target.answer("Как зовут персонажа?")
+    await state.set_state(Setup.name)
+
+
+async def _ask_archetype(target: Message, state: FSMContext):
+    await target.answer(
+        "Выбери **архетип характера** или создай свой:",
+        reply_markup=ARCHETYPE_KB,
+    )
+    await state.set_state(Setup.archetype)
+
+
+async def _ask_extra_notes(target: Message, state: FSMContext):
+    await target.answer(
+        "Хочешь добавить что-то о персонаже от себя?\n"
+        "_Например: внешность, прошлое, особые черты._",
+        reply_markup=NOTES_KB,
+        parse_mode="Markdown",
+    )
+    await state.set_state(Setup.extra_notes)
+
+
+async def _ask_class(target: Message, state: FSMContext):
+    await target.answer("Выбери **класс**:", reply_markup=CLASS_KB)
+    await state.set_state(Setup.class_choice)
+
+
+async def _show_archetype_menu(target_msg: Message, state: FSMContext):
+    await target_msg.edit_text(
+        "Выбери **архетип характера** или создай свой:",
+        reply_markup=ARCHETYPE_KB,
+        parse_mode="Markdown",
+    )
 
 
 # ---------- /start ----------
@@ -206,32 +304,220 @@ async def setup_setting(m: Message, state: FSMContext):
         await m.answer("Сначала закончим создание персонажа.")
         return
     await state.update_data(setting=m.text.strip())
-    await m.answer("Как зовут твоего персонажа?")
-    await state.set_state(Setup.name)
+    await _ask_tone(m, state)
 
 
+# --- Тон ---
+@dp.callback_query(F.data.startswith("tone_"))
+async def cb_tone(cb: CallbackQuery, state: FSMContext):
+    key = cb.data.replace("tone_", "")
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    if key == "custom":
+        await cb.message.answer("Введи тон 1-3 словами (например: «северный нуар»):")
+        await state.set_state(Setup.tone_custom)
+        await cb.answer()
+        return
+
+    tone = TONES.get(key)
+    if not tone:
+        await cb.answer("Неизвестный тон.", show_alert=True)
+        return
+    await state.update_data(tone=tone)
+    await _ask_world_desc(cb.message, state)
+    await cb.answer()
+
+
+@dp.message(Setup.tone_custom, F.text)
+async def setup_tone_custom(m: Message, state: FSMContext):
+    text = m.text.strip()
+    words = text.split()
+    if len(words) > 3:
+        words = words[:3]
+    tone = " ".join(words) or "нейтральный"
+    await state.update_data(tone=tone)
+    await _ask_world_desc(m, state)
+
+
+# --- Описание мира ---
+@dp.message(Setup.world_desc, F.text)
+async def setup_world_desc(m: Message, state: FSMContext):
+    if m.text == "🎒 Инвентарь":
+        await m.answer("Сначала закончим создание персонажа.")
+        return
+    text = m.text.strip()[:500]
+    await state.update_data(world_desc=text)
+    await _ask_name(m, state)
+
+
+@dp.callback_query(F.data == "skip_world_desc")
+async def cb_skip_world_desc(cb: CallbackQuery, state: FSMContext):
+    await state.update_data(world_desc="")
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await _ask_name(cb.message, state)
+    await cb.answer()
+
+
+# --- Имя ---
 @dp.message(Setup.name, F.text)
 async def setup_name(m: Message, state: FSMContext):
     if m.text == "🎒 Инвентарь":
         await m.answer("Сначала закончим создание персонажа.")
         return
     await state.update_data(name=m.text.strip())
-    await m.answer(
-        "Расскажи коротко о своём персонаже — кто он, откуда, как выглядит, "
-        "какой у него характер и что важно знать. Пара-тройка предложений.\n\n"
-        "_Это описание мастер будет использовать в сценах._",
-        parse_mode="Markdown",
-    )
-    await state.set_state(Setup.personality)
+    await _ask_archetype(m, state)
 
 
-@dp.message(Setup.personality, F.text)
-async def setup_personality(m: Message, state: FSMContext):
+# --- Архетип ---
+@dp.message(Setup.archetype, F.text)
+async def setup_archetype_text(m: Message, state: FSMContext):
+    await m.answer("Выбери архетип кнопкой, или нажми «Свой» / «Пропустить».")
+
+
+@dp.callback_query(F.data.startswith("arch_"))
+async def cb_arch(cb: CallbackQuery, state: FSMContext):
+    action = cb.data
+
+    if action == "arch_custom":
+        try:
+            await cb.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await cb.message.answer("**Привычки** персонажа (что делает машинально):",
+                                parse_mode="Markdown")
+        await state.set_state(Setup.custom_habits)
+        await cb.answer()
+        return
+
+    if action == "arch_skip":
+        await state.update_data(archetype="", habits="", manner="",
+                                fears="", motivation="")
+        try:
+            await cb.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await _ask_extra_notes(cb.message, state)
+        await cb.answer()
+        return
+
+    if action == "arch_back":
+        try:
+            await _show_archetype_menu(cb.message, state)
+        except Exception:
+            pass
+        await cb.answer()
+        return
+
+    if action.startswith("arch_confirm_"):
+        key = action.replace("arch_confirm_", "")
+        await state.update_data(archetype=key)
+        try:
+            await cb.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await _ask_extra_notes(cb.message, state)
+        await cb.answer()
+        return
+
+    if action.startswith("arch_view_"):
+        key = action.replace("arch_view_", "")
+        a = ARCHETYPES.get(key)
+        if not a:
+            await cb.answer("Неизвестный архетип.", show_alert=True)
+            return
+        text = (
+            f"{a['emoji']} <b>{a['name']}</b>\n\n"
+            f"<b>Привычки:</b> {a['habits']}\n"
+            f"<b>Манера:</b> {a['manner']}\n"
+            f"<b>Страхи:</b> {a['fears']}\n"
+            f"<b>Мотив:</b> {a['motivation']}"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Подтвердить",
+                                 callback_data=f"arch_confirm_{key}"),
+            InlineKeyboardButton(text="⬅️ Назад",
+                                 callback_data="arch_back"),
+        ]])
+        try:
+            await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            pass
+        await cb.answer()
+        return
+
+    await cb.answer()
+
+
+# --- Свой характер: 4 вопроса ---
+@dp.message(Setup.custom_habits, F.text)
+async def setup_custom_habits(m: Message, state: FSMContext):
+    await state.update_data(habits=m.text.strip()[:200])
+    await m.answer("**Манера** — как ведёт себя, как говорит:", parse_mode="Markdown")
+    await state.set_state(Setup.custom_manner)
+
+
+@dp.message(Setup.custom_manner, F.text)
+async def setup_custom_manner(m: Message, state: FSMContext):
+    await state.update_data(manner=m.text.strip()[:200])
+    await m.answer("**Страхи** — чего боится:", parse_mode="Markdown")
+    await state.set_state(Setup.custom_fears)
+
+
+@dp.message(Setup.custom_fears, F.text)
+async def setup_custom_fears(m: Message, state: FSMContext):
+    await state.update_data(fears=m.text.strip()[:200])
+    await m.answer("**Мотив** — что движет героем:", parse_mode="Markdown")
+    await state.set_state(Setup.custom_motivation)
+
+
+@dp.message(Setup.custom_motivation, F.text)
+async def setup_custom_motivation(m: Message, state: FSMContext):
+    await state.update_data(motivation=m.text.strip()[:200])
+    await _ask_extra_notes(m, state)
+
+
+# --- Доп. описание ---
+@dp.callback_query(F.data == "notes_add")
+async def cb_notes_add(cb: CallbackQuery, state: FSMContext):
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await cb.message.answer("Напиши доп. описание персонажа (внешность, прошлое, черты):")
+    await state.set_state(Setup.extra_notes)
+    await cb.answer()
+
+
+@dp.callback_query(F.data == "notes_skip")
+async def cb_notes_skip(cb: CallbackQuery, state: FSMContext):
+    await state.update_data(notes="")
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await _ask_class(cb.message, state)
+    await cb.answer()
+
+
+@dp.message(Setup.extra_notes, F.text)
+async def setup_extra_notes(m: Message, state: FSMContext):
     if m.text == "🎒 Инвентарь":
         await m.answer("Сначала закончим создание персонажа.")
         return
-    await state.update_data(personality=m.text.strip())
-    await m.answer("Выбери **класс**:", reply_markup=CLASS_KB)
+    await state.update_data(notes=m.text.strip()[:500])
+    await _ask_class(m, state)
+
+
+# --- Класс ---
+@dp.message(Setup.class_choice, F.text)
+async def setup_class_text(m: Message, state: FSMContext):
+    await m.answer("Выбери класс кнопкой.")
 
 
 @dp.callback_query(F.data.startswith("class_"))
@@ -242,18 +528,36 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
         return
 
     data = await state.get_data()
-    if not data.get("setting") or not data.get("name") or not data.get("personality"):
+    required = ("setting", "name")
+    if not all(data.get(k) for k in required):
         await cb.answer("Сессия создания истекла. Напиши /start", show_alert=True)
         await state.clear()
         return
 
     await state.clear()
 
+    # Собираем характер
+    archetype_key = data.get("archetype", "")
+    if archetype_key and archetype_key in ARCHETYPES:
+        personality = new_personality(
+            archetype_key=archetype_key,
+            notes=data.get("notes", ""),
+        )
+    else:
+        personality = new_personality(
+            habits=data.get("habits", ""),
+            manner=data.get("manner", ""),
+            fears=data.get("fears", ""),
+            motivation=data.get("motivation", ""),
+            notes=data.get("notes", ""),
+        )
+
     world = new_world(cb.from_user.id)
-    world["world"]["setting"] = data["setting"]
-    world["world"]["tone"] = "тёмное фэнтези"
+    world["world"]["setting"] = data.get("setting", "")
+    world["world"]["tone"] = data.get("tone", "тёмное фэнтези")
+    world["world"]["description"] = data.get("world_desc", "")
     world["world"]["milestone"] = "Пролог"
-    world["character"] = new_character(data["name"], data["personality"], cls_key)
+    world["character"] = new_character(data["name"], personality, cls_key)
 
     storage.save(cb.from_user.id, world)
     cls = CLASSES[cls_key]
@@ -277,7 +581,8 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
             "[Начало игры. Сначала придумай ФИНАЛ всей истории — что должно "
             "случиться в конце, к чему всё идёт. Сохрани в memory.world.final "
             "(1-3 предложения). Затем опиши стартовую сцену: где герой, что "
-            "он видит, завязка сюжета. Финал в narrative НЕ раскрывай. "
+            "он видит, завязка сюжета. НЕ используй клише (таверна, площадь, "
+            "пробуждение в постели). Финал в narrative НЕ раскрывай. "
             "Закончи на крючке.]"
         )
         world["last_narrative"] = result["text"]
@@ -499,7 +804,7 @@ async def cb_inv_use(cb: CallbackQuery):
                 _with_epilogue(world, result["text"]),
                 reply_markup=voice_kb(),
             )
-        except Exception as e:
+        except Exception:
             logging.exception("LLM after combat")
             await cb.message.answer("(мастер промолчал)")
         return
@@ -590,7 +895,7 @@ async def cb_attack(cb: CallbackQuery):
             enemy_log = C.enemy_turn(world)
             if enemy_log:
                 lines.append(enemy_log)
-    except Exception as e:
+    except Exception:
         logging.exception("combat error")
         try:
             C.end_combat(world)
@@ -635,7 +940,7 @@ async def cb_skill(cb: CallbackQuery):
             enemy_log = C.enemy_turn(world)
             if enemy_log:
                 lines.append(enemy_log)
-    except Exception as e:
+    except Exception:
         logging.exception("skill error")
         try:
             C.end_combat(world)
@@ -689,7 +994,7 @@ async def _finish_turn(cb: CallbackQuery, world: dict, text: str):
             _with_epilogue(world, result["text"]),
             reply_markup=voice_kb(),
         )
-    except Exception as e:
+    except Exception:
         logging.exception("LLM after combat")
         await cb.message.answer("(мастер промолчал)")
 
@@ -727,7 +1032,7 @@ async def cb_flee(cb: CallbackQuery):
             _with_epilogue(world, result["text"]),
             reply_markup=voice_kb(),
         )
-    except Exception as e:
+    except Exception:
         logging.exception("LLM after flee")
         await cb.message.answer("(мастер промолчал)")
 
@@ -755,7 +1060,7 @@ async def cmd_flee(m: Message):
             _with_epilogue(world, result["text"]),
             reply_markup=voice_kb(),
         )
-    except Exception as e:
+    except Exception:
         logging.exception("LLM after flee")
         await m.answer("(мастер промолчал)")
 
@@ -798,7 +1103,7 @@ async def handle(m: Message):
 
     try:
         result = await engine.process_action(world, m.text.strip())
-    except Exception as e:
+    except Exception:
         logging.exception("LLM error")
         await m.answer("⚠️ Мастер задумался. Попробуй ещё раз.")
         return
