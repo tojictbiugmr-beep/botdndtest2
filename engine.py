@@ -49,9 +49,12 @@ async def process_action(world: dict, user_input: str) -> dict:
     push_history(world, "assistant", json.dumps(short, ensure_ascii=False))
 
     if check:
-        world["pending"] = {"check": check, "memory": memory, "narrative": narrative}
+        stat = check.get("stat", "DEX")
+        diff = _safe_int(check.get("difficulty", 12), 12)
+        header = f"🎲 Требуется проверка: {stat} (сл. {diff})"
+        world["pending"] = {"check": check, "memory": memory, "narrative": ""}
         clear_recent_actions(world)
-        return {"type": "check", "text": narrative, "check": check}
+        return {"type": "check", "text": header, "check": check}
 
     apply_memory(world, memory)
     _update_epilogue(world)
@@ -100,61 +103,52 @@ async def resolve_check(world: dict) -> dict:
 
     apply_memory(world, pending["memory"])
 
-    need_scene = crit_success or crit_fail or important
+    # ВСЕГДА полная сцена после броска
+    ctx = build_context(world)
+    try:
+        data = await ask_check_result(check, roll, verdict, ctx)
+    except Exception:
+        logging.exception("check result LLM error")
+        data = None
 
-    if need_scene:
-        ctx = build_context(world)
-        try:
-            data = await ask_check_result(check, roll, verdict, ctx)
-        except Exception:
-            logging.exception("check result LLM error")
-            data = None
+    if data:
+        narrative = data.get("narrative", "").strip() or "..."
+        memory = data.get("memory") or {}
+        new_check = data.get("check")
+        new_combat = data.get("start_combat")
 
-        if data:
-            narrative = data.get("narrative", "").strip() or "..."
-            memory = data.get("memory") or {}
-            new_check = data.get("check")
-            new_combat = data.get("start_combat")
+        apply_memory(world, memory)
+        _update_epilogue(world)
 
-            apply_memory(world, memory)
-            _update_epilogue(world)
+        result_text = f"{roll_line}\n\n{narrative}"
+        push_history(world, "assistant", result_text)
+        world["pending"] = None
 
-            result_text = f"{roll_line}\n\n{narrative}"
-            push_history(world, "assistant", result_text)
-            world["pending"] = None
+        if new_check:
+            stat2 = new_check.get("stat", "DEX")
+            diff2 = _safe_int(new_check.get("difficulty", 12), 12)
+            header = f"🎲 Требуется проверка: {stat2} (сл. {diff2})"
+            world["pending"] = {
+                "check": new_check,
+                "memory": {},
+                "narrative": "",
+            }
+            return {"type": "check", "text": result_text, "check": new_check}
 
-            if new_check:
-                world["pending"] = {
-                    "check": new_check,
-                    "memory": {},
-                    "narrative": narrative,
-                }
-                return {"type": "check", "text": result_text, "check": new_check}
+        if new_combat and new_combat.get("enemies"):
+            start_combat(world, new_combat["enemies"])
+            return {"type": "combat", "text": result_text}
 
-            if new_combat and new_combat.get("enemies"):
-                start_combat(world, new_combat["enemies"])
-                return {"type": "combat", "text": result_text}
+        return {"type": "text", "text": result_text, "roll": roll}
 
-            return {"type": "text", "text": result_text, "roll": roll}
-
-        branch_raw = check.get("success" if roll["success"] else "fail")
-        branch = str(branch_raw).strip() if branch_raw else (
-            "Тебе удаётся сделать задуманное."
-            if roll["success"]
-            else "Что-то идёт не так — последствия могут быть тяжёлыми."
-        )
-        result_text = f"{roll_line}\n\n{branch}"
-    else:
-        branch_raw = check.get("success" if roll["success"] else "fail")
-        if not branch_raw or isinstance(branch_raw, bool):
-            branch = (
-                "Тебе удаётся сделать задуманное."
-                if roll["success"]
-                else "Что-то идёт не так — последствия могут быть тяжёлыми."
-            )
-        else:
-            branch = str(branch_raw).strip()
-        result_text = f"{roll_line}\n\n{branch}"
+    # Fallback, если второй запрос упал
+    branch_raw = check.get("success" if roll["success"] else "fail")
+    branch = str(branch_raw).strip() if branch_raw else (
+        "Тебе удаётся сделать задуманное."
+        if roll["success"]
+        else "Что-то идёт не так — последствия могут быть тяжёлыми."
+    )
+    result_text = f"{roll_line}\n\n{branch}"
 
     push_history(world, "assistant", result_text)
     world["pending"] = None
