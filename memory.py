@@ -1,5 +1,5 @@
 from config import MAX_EVENTS, EVENTS_CTX, MAX_HISTORY
-from character import CLASSES, apply_delta
+from character import CLASSES, apply_delta, format_personality
 from inventory import add_item, remove_item
 
 MAX_RECENT_ACTIONS = 5
@@ -11,6 +11,7 @@ def new_world(user_id: int) -> dict:
         "world": {
             "setting": "",
             "tone": "",
+            "description": "",
             "milestone": "",
             "progress": 0,
             "mode": "AMBIENT",
@@ -71,9 +72,17 @@ def apply_memory(world: dict, mem: dict):
         return
 
     w = mem.get("world") or {}
-    for k in ("setting", "tone", "milestone", "mode", "final"):
+    for k in ("setting", "tone", "milestone", "mode"):
         if w.get(k):
             world["world"][k] = w[k]
+
+    # final — только при первом заполнении, не перезаписываем
+    if w.get("final") and not world["world"].get("final"):
+        world["world"]["final"] = w["final"]
+
+    # description — тоже только один раз (игрок задал при старте)
+    if w.get("description") and not world["world"].get("description"):
+        world["world"]["description"] = w["description"]
 
     if "boss_defeated" in w and w["boss_defeated"] is not None:
         world["world"]["boss_defeated"] = bool(w["boss_defeated"])
@@ -122,7 +131,13 @@ def build_context(world: dict) -> str:
     lines.append("=== ПАМЯТЬ МАСТЕРА (не знания NPC) ===")
 
     w = world["world"]
-    lines.append(f"МИР: {w['setting']} | тон: {w['tone']}")
+    lines.append(f"СЕТТИНГ: {w.get('setting', '') or '—'}")
+    lines.append(f"ТОН: {w.get('tone', '') or '—'}")
+
+    desc = w.get("description", "")
+    if desc:
+        lines.append(f"МИР (задан игроком): {desc}")
+
     lines.append(f"MILESTONE: {w['milestone'] or '—'} ({w['progress']}%)")
     lines.append(f"РЕЖИМ: {w['mode']}")
 
@@ -147,13 +162,34 @@ def build_context(world: dict) -> str:
     lines.append(
         f"ИГРОК (служебные данные, NPC их не знают): "
         f"{c.get('name','?')} — {cls.get('name','')}, ур. {c.get('level',1)}. "
-        f"Описание (для отыгрыша): {c.get('personality','')}. "
         f"HP {c.get('hp',0)}/{c.get('hp_max',0)}, "
         f"золото {c.get('gold',0)}, состояние: {c.get('state','')}"
     )
 
+    # Характер — отдельным блоком
+    p = c.get("personality")
+    if p:
+        lines.append("")
+        lines.append("ХАРАКТЕР ПЕРСОНАЖА (используй в каждой сцене — привычку, манеру, страх, мотив):")
+        if isinstance(p, dict):
+            if p.get("archetype"):
+                lines.append(f"  • Архетип: {p['archetype']}")
+            if p.get("habits"):
+                lines.append(f"  • Привычки: {p['habits']}")
+            if p.get("manner"):
+                lines.append(f"  • Манера: {p['manner']}")
+            if p.get("fears"):
+                lines.append(f"  • Страхи: {p['fears']}")
+            if p.get("motivation"):
+                lines.append(f"  • Мотив: {p['motivation']}")
+            if p.get("notes"):
+                lines.append(f"  • Доп.: {p['notes']}")
+        else:
+            lines.append(f"  • {p}")
+
     inv = c.get("inventory", [])
     if inv:
+        lines.append("")
         lines.append("ИНВЕНТАРЬ (у игрока):")
         for it in inv:
             qty = it.get("qty", 1)
