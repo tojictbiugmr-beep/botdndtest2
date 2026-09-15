@@ -38,15 +38,20 @@ async def process_action(world: dict, user_input: str) -> dict:
 
     print("LLM RAW:", json.dumps(data, ensure_ascii=False)[:1000])
 
-    narrative = data.get("narrative", "").strip() or "..."
+    narrative_raw = data.get("narrative", "").strip()
     memory = data.get("memory") or {}
     check = data.get("check")
     start_c = data.get("start_combat")
 
+    # При check narrative пустая — не подставляем "..."
+    narrative = narrative_raw or ("" if check else "...")
+
     push_history(world, "user", user_input)
 
-    short = {"narrative": narrative, "memory": memory}
-    push_history(world, "assistant", json.dumps(short, ensure_ascii=False))
+    # В историю пишем только непустой narrative
+    if narrative:
+        short = {"narrative": narrative, "memory": memory}
+        push_history(world, "assistant", json.dumps(short, ensure_ascii=False))
 
     if check:
         stat = check.get("stat", "DEX")
@@ -85,7 +90,6 @@ async def resolve_check(world: dict) -> dict:
 
     crit_success = roll.get("crit_success", False)
     crit_fail = roll.get("crit_fail", False)
-    important = bool(check.get("important"))
 
     if crit_success:
         verdict = "КРИТ. УСПЕХ"
@@ -125,9 +129,6 @@ async def resolve_check(world: dict) -> dict:
         world["pending"] = None
 
         if new_check:
-            stat2 = new_check.get("stat", "DEX")
-            diff2 = _safe_int(new_check.get("difficulty", 12), 12)
-            header = f"🎲 Требуется проверка: {stat2} (сл. {diff2})"
             world["pending"] = {
                 "check": new_check,
                 "memory": {},
