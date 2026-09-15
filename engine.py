@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from llm import ask_master, ask_check_result
 from memory import (
     build_context,
@@ -16,6 +17,51 @@ def _safe_int(value, default: int = 0) -> int:
         return int(float(str(value).replace("%", "").strip()))
     except (ValueError, TypeError):
         return default
+
+
+def _get_prev_narratives(history: list, n: int = 3) -> list:
+    """Достаёт narrative из последних n ответов ассистента."""
+    prev = []
+    for h in history:
+        if h.get("role") != "assistant":
+            continue
+        content = h.get("content", "")
+        try:
+            d = json.loads(content)
+            txt = d.get("narrative", "")
+        except Exception:
+            txt = content
+        if txt:
+            prev.append(txt)
+    return prev[-n:]
+
+
+def _anti_repeat(text: str, history: list) -> str:
+    """Срезает предложения, дублирующие прошлые ответы."""
+    if not text or not history:
+        return text
+    prev = _get_prev_narratives(history, n=3)
+    if not prev:
+        return text
+
+    sents = re.split(r'(?<=[.!?…])\s+', text.strip())
+    filtered = []
+    for s in sents:
+        if not s:
+            continue
+        dup = False
+        if len(s) > 30:
+            head = s[:40].lower()
+            for p in prev:
+                if head in p.lower():
+                    dup = True
+                    break
+        if not dup:
+            filtered.append(s)
+
+    if not filtered:
+        return text
+    return " ".join(filtered)
 
 
 def _update_epilogue(world: dict):
@@ -46,9 +92,12 @@ async def process_action(world: dict, user_input: str) -> dict:
     # При check narrative пустая — не подставляем "..."
     narrative = narrative_raw or ("" if check else "...")
 
+    # Анти-повтор: срезаем дубли из прошлых ответов
+    if narrative:
+        narrative = _anti_repeat(narrative, world["history"])
+
     push_history(world, "user", user_input)
 
-    # В историю пишем только непустой narrative
     if narrative:
         short = {"narrative": narrative, "memory": memory}
         push_history(world, "assistant", json.dumps(short, ensure_ascii=False))
@@ -117,6 +166,8 @@ async def resolve_check(world: dict) -> dict:
 
     if data:
         narrative = data.get("narrative", "").strip() or "..."
+        narrative = _anti_repeat(narrative, world["history"])
+
         memory = data.get("memory") or {}
         new_check = data.get("check")
         new_combat = data.get("start_combat")
