@@ -28,6 +28,18 @@ bot = Bot(BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 
+SETTING_QUESTION = (
+    "Опиши **сеттинг** — мир, в котором будет происходить история.\n"
+    "Это может быть 1-2 предложения: эпоха, жанр, атмосфера, ключевая деталь.\n\n"
+    "_Пример: «Мрачное средневековье, магия под запретом, инквизиция "
+    "охотится на колдунов. Где-то в северных лесах пробудилось древнее зло»._\n\n"
+    "От чего отталкиваться:\n"
+    "• Эпоха — средневековье, будущее, современность\n"
+    "• Жанр — фэнтези, киберпанк, хоррор, постапокалипсис\n"
+    "• Особенность — что делает мир уникальным"
+)
+
+
 # ---------- Фильтр инъекций ----------
 INJECTION_MARKERS = (
     "забудь предыдущие",
@@ -278,7 +290,8 @@ async def cmd_start(m: Message, state: FSMContext):
         await m.answer("Выбери действие:", reply_markup=CONTINUE_KB)
         return
     await m.answer(
-        "Новая игра.\n\nОпиши **сеттинг** мира (эпоха, жанр, атмосфера):",
+        "Новая игра.\n\n" + SETTING_QUESTION,
+        parse_mode="Markdown",
         reply_markup=INVENTORY_KB,
     )
     await state.set_state(Setup.setting)
@@ -292,7 +305,11 @@ async def cb_continue(cb: CallbackQuery):
 
 @dp.callback_query(F.data == "restart")
 async def cb_restart(cb: CallbackQuery, state: FSMContext):
-    await cb.message.answer("Опиши **сеттинг** мира:", reply_markup=INVENTORY_KB)
+    await cb.message.answer(
+        SETTING_QUESTION,
+        parse_mode="Markdown",
+        reply_markup=INVENTORY_KB,
+    )
     await state.set_state(Setup.setting)
     await cb.answer()
 
