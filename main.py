@@ -129,14 +129,14 @@ SKIP_DESC_KB = InlineKeyboardMarkup(inline_keyboard=[[
 ]])
 
 ARCHETYPE_KB = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="🌲 Отшельник", callback_data="arch_view_hermit"),
-     InlineKeyboardButton(text="🏃 Беглец", callback_data="arch_view_fugitive")],
-    [InlineKeyboardButton(text="⚔️ Авантюрист", callback_data="arch_view_adventurer"),
-     InlineKeyboardButton(text="🗡️ Мститель", callback_data="arch_view_avenger")],
-    [InlineKeyboardButton(text="📜 Искатель", callback_data="arch_view_seeker"),
-     InlineKeyboardButton(text="🌹 Романтик", callback_data="arch_view_romantic")],
-    [InlineKeyboardButton(text="🛡️ Солдат", callback_data="arch_view_soldier"),
-     InlineKeyboardButton(text="🎭 Шут", callback_data="arch_view_jester")],
+    [InlineKeyboardButton(text="🌲 Затворник", callback_data="arch_view_hermit"),
+     InlineKeyboardButton(text="🌑 Скрытный", callback_data="arch_view_fugitive")],
+    [InlineKeyboardButton(text="🎲 Азартный", callback_data="arch_view_adventurer"),
+     InlineKeyboardButton(text="🔥 Непреклонный", callback_data="arch_view_avenger")],
+    [InlineKeyboardButton(text="📖 Любознательный", callback_data="arch_view_seeker"),
+     InlineKeyboardButton(text="✨ Мечтатель", callback_data="arch_view_romantic")],
+    [InlineKeyboardButton(text="⛰️ Стойкий", callback_data="arch_view_soldier"),
+     InlineKeyboardButton(text="🎭 Насмешник", callback_data="arch_view_jester")],
     [InlineKeyboardButton(text="✍️ Свой", callback_data="arch_custom"),
      InlineKeyboardButton(text="⏭ Пропустить", callback_data="arch_skip")],
 ])
@@ -230,7 +230,7 @@ def _with_epilogue(world: dict, text: str) -> str:
 # ---------- Хелперы создания персонажа ----------
 async def _ask_tone(target: Message, state: FSMContext):
     await target.answer("Выбери **тон** повествования:", reply_markup=TONE_KB)
-    await state.set_state(Setup.tone_custom)  # перезапишется в cb_tone
+    await state.set_state(Setup.tone_custom)
 
 
 async def _ask_world_desc(target: Message, state: FSMContext):
@@ -455,6 +455,8 @@ async def cb_arch(cb: CallbackQuery, state: FSMContext):
             f"<b>Страхи:</b> {a['fears']}\n"
             f"<b>Мотив:</b> {a['motivation']}"
         )
+        if a.get("conflict"):
+            text += f"\n<b>Внутренний конфликт:</b> {a['conflict']}"
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="✅ Подтвердить",
                                  callback_data=f"arch_confirm_{key}"),
@@ -623,7 +625,7 @@ async def cb_class(cb: CallbackQuery, state: FSMContext):
                 _with_epilogue(world, result["text"]),
                 reply_markup=voice_kb(),
             )
-    except Exception as e:
+    except Exception:
         logging.exception("LLM start scene error")
         await cb.message.answer(
             "⚠️ Мастер задумался на старте. Напиши любое действие, чтобы начать."
@@ -649,7 +651,7 @@ async def cb_voice(cb: CallbackQuery):
     await bot.send_chat_action(cb.message.chat.id, "record_voice")
     try:
         audio_bytes, truncated = await voice.synthesize(text)
-    except Exception as e:
+    except Exception:
         logging.exception("voice error")
         await cb.message.answer("⚠️ Ошибка озвучки. Попробуй позже.")
         return
