@@ -1,5 +1,5 @@
 from config import MAX_EVENTS, EVENTS_CTX, MAX_HISTORY
-from character import CLASSES, apply_delta, format_personality
+from character import CLASSES, apply_delta
 from inventory import add_item, remove_item
 
 MAX_RECENT_ACTIONS = 5
@@ -84,8 +84,9 @@ def apply_memory(world: dict, mem: dict):
     if w.get("description") and not world["world"].get("description"):
         world["world"]["description"] = w["description"]
 
-    if "boss_defeated" in w and w["boss_defeated"] is not None:
-        world["world"]["boss_defeated"] = bool(w["boss_defeated"])
+    # boss_defeated — только true, не откатываем
+    if w.get("boss_defeated") is True:
+        world["world"]["boss_defeated"] = True
 
     if "progress" in w and w["progress"] is not None:
         world["world"]["progress"] = _safe_int(
@@ -166,9 +167,9 @@ def build_context(world: dict) -> str:
         f"золото {c.get('gold',0)}, состояние: {c.get('state','')}"
     )
 
-    # Характер — отдельным блоком
+    # Характер — отдельным блоком, только если есть хоть одно поле
     p = c.get("personality")
-    if p:
+    if p and (not isinstance(p, dict) or any(p.values())):
         lines.append("")
         lines.append("ХАРАКТЕР ПЕРСОНАЖА (используй в каждой сцене — привычку, манеру, страх, мотив):")
         if isinstance(p, dict):
@@ -194,8 +195,8 @@ def build_context(world: dict) -> str:
         for it in inv:
             qty = it.get("qty", 1)
             qty_str = f" ×{qty}" if qty > 1 else ""
-            desc = f" — {it['desc']}" if it.get("desc") else ""
-            lines.append(f"  • {it['name']}{qty_str}{desc}")
+            desc_it = f" — {it['desc']}" if it.get("desc") else ""
+            lines.append(f"  • {it['name']}{qty_str}{desc_it}")
 
     recent = world.get("recent_actions") or []
     if recent:
