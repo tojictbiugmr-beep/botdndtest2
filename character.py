@@ -61,6 +61,75 @@ CLASSES = {
     },
 }
 
+
+ARCHETYPES = {
+    "hermit": {
+        "name": "Отшельник",
+        "emoji": "🌲",
+        "habits": "постоянно проверяет ножны, ест молча, сидит спиной к стене",
+        "manner": "говорит тихо, не смотрит в глаза",
+        "fears": "боится открытого огня, толпы",
+        "motivation": "найти тихое место, где его не найдут",
+    },
+    "fugitive": {
+        "name": "Беглец",
+        "emoji": "🏃",
+        "habits": "оборачивается через каждые пять минут, спит чутко",
+        "manner": "уклончив, меняет тему, врёт по мелочам",
+        "fears": "быть узнанным, прошлое",
+        "motivation": "скрыться от тех, кто идёт следом",
+    },
+    "adventurer": {
+        "name": "Авантюрист",
+        "emoji": "⚔️",
+        "habits": "играет монетой, свистит, первым идёт в дверь",
+        "manner": "громкий, весёлый, перебивает",
+        "fears": "скука, одиночество",
+        "motivation": "найти приключение и наживу",
+    },
+    "avenger": {
+        "name": "Мститель",
+        "emoji": "🗡️",
+        "habits": "точит оружие каждый вечер, ведёт список",
+        "manner": "холоден, резок, не улыбается",
+        "fears": "не успеть, умереть до цели",
+        "motivation": "отомстить за погибших близких",
+    },
+    "seeker": {
+        "name": "Искатель",
+        "emoji": "📜",
+        "habits": "записывает в блокнот, разглядывает вещи вблизи",
+        "manner": "любопытен, задаёт много вопросов",
+        "fears": "невежество, тайны без ответа",
+        "motivation": "узнать правду о древнем знании",
+    },
+    "romantic": {
+        "name": "Романтик",
+        "emoji": "🌹",
+        "habits": "любуется закатом, сочиняет стихи",
+        "manner": "мягок, галантен, преувеличенно вежлив",
+        "fears": "быть осмеянным, отвергнутым",
+        "motivation": "найти любовь или великое дело",
+    },
+    "soldier": {
+        "name": "Солдат",
+        "emoji": "🛡️",
+        "habits": "встаёт до рассвета, чистит броню, считает шаги",
+        "manner": "лаконичен, действует по команде",
+        "fears": "предательство, неподчинение",
+        "motivation": "выполнить долг, искупить вину",
+    },
+    "jester": {
+        "name": "Шут",
+        "emoji": "🎭",
+        "habits": "шутит в неподходящий момент, ворует мелочи",
+        "manner": "болтлив, неуместен, обаятелен",
+        "fears": "серьёзность, скука",
+        "motivation": "развлечься, скрыть боль за смехом",
+    },
+}
+
+
 MAX_LEVEL = 5
 XP_TO_REACH = {2: 20, 3: 50, 4: 100, 5: 180}
 CHARGES_PER_FIGHT = 2
@@ -77,7 +146,40 @@ def level_bonus(level: int) -> tuple:
     return hp_bonus, dmg_bonus, armor_bonus
 
 
-def new_character(name: str, personality: str, cls_key: str) -> dict:
+def new_personality(archetype_key: str = "", habits: str = "",
+                    manner: str = "", fears: str = "",
+                    motivation: str = "", notes: str = "") -> dict:
+    """Собирает dict характера. archetype_key — ключ из ARCHETYPES или пусто."""
+    arch_name = ""
+    if archetype_key in ARCHETYPES:
+        a = ARCHETYPES[archetype_key]
+        arch_name = a["name"]
+        if not habits:
+            habits = a["habits"]
+        if not manner:
+            manner = a["manner"]
+        if not fears:
+            fears = a["fears"]
+        if not motivation:
+            motivation = a["motivation"]
+
+    return {
+        "archetype": arch_name,
+        "habits": habits or "",
+        "manner": manner or "",
+        "fears": fears or "",
+        "motivation": motivation or "",
+        "notes": notes or "",
+    }
+
+
+def new_character(name: str, personality, cls_key: str) -> dict:
+    """personality — dict или строка (для совместимости)."""
+    if isinstance(personality, str):
+        personality = new_personality(notes=personality)
+    elif not isinstance(personality, dict):
+        personality = new_personality()
+
     cls = CLASSES.get(cls_key, CLASSES["warrior"])
     hp_bonus, dmg_bonus, armor_bonus = level_bonus(1)
     hp_max = cls["hp_base"] + hp_bonus
@@ -126,11 +228,35 @@ def check_level_up(char: dict) -> list:
     return msgs
 
 
+def format_personality(p) -> str:
+    """Форматирует характер для вывода в контекст мастера."""
+    if not p:
+        return "—"
+    if isinstance(p, str):
+        return p
+    parts = []
+    if p.get("archetype"):
+        parts.append(f"Архетип: {p['archetype']}")
+    if p.get("habits"):
+        parts.append(f"Привычки: {p['habits']}")
+    if p.get("manner"):
+        parts.append(f"Манера: {p['manner']}")
+    if p.get("fears"):
+        parts.append(f"Страхи: {p['fears']}")
+    if p.get("motivation"):
+        parts.append(f"Мотив: {p['motivation']}")
+    if p.get("notes"):
+        parts.append(f"Доп.: {p['notes']}")
+    return " | ".join(parts) if parts else "—"
+
+
 def apply_delta(char: dict, delta: dict):
     if "hp_delta" in delta:
         char["hp"] = max(0, min(char["hp_max"], char["hp"] + int(delta["hp_delta"])))
     if "gold_delta" in delta:
         char["gold"] = max(0, char["gold"] + int(delta["gold_delta"]))
-    for key in ("state", "personality", "name"):
+    for key in ("state", "name"):
         if delta.get(key):
             char[key] = delta[key]
+    # personality приходит от LLM редко и обычно как строка — игнорируем,
+    # чтобы не сломать dict-структуру
