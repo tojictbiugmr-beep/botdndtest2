@@ -14,6 +14,10 @@ def new_world(user_id: int) -> dict:
             "milestone": "",
             "progress": 0,
             "mode": "AMBIENT",
+            "final": "",
+            "boss_defeated": False,
+            "epilogue_turns": 0,
+            "final_reached": False,
         },
         "character": {},
         "npcs": {},
@@ -67,9 +71,12 @@ def apply_memory(world: dict, mem: dict):
         return
 
     w = mem.get("world") or {}
-    for k in ("setting", "tone", "milestone", "mode"):
+    for k in ("setting", "tone", "milestone", "mode", "final"):
         if w.get(k):
             world["world"][k] = w[k]
+
+    if "boss_defeated" in w and w["boss_defeated"] is not None:
+        world["world"]["boss_defeated"] = bool(w["boss_defeated"])
 
     if "progress" in w and w["progress"] is not None:
         world["world"]["progress"] = _safe_int(
@@ -119,6 +126,22 @@ def build_context(world: dict) -> str:
     lines.append(f"MILESTONE: {w['milestone'] or '—'} ({w['progress']}%)")
     lines.append(f"РЕЖИМ: {w['mode']}")
 
+    final = w.get("final", "")
+    if final:
+        lines.append(f"ФИНАЛ (скрыт от игрока, вести к нему): {final}")
+
+    if w.get("final_reached"):
+        lines.append("СТАТУС: ИСТОРИЯ ЗАВЕРШЕНА")
+    elif w.get("epilogue_turns", 0) > 0:
+        lines.append(
+            f"СТАТУС: ЭПИЛОГ, осталось {w['epilogue_turns']} ходов до конца. "
+            f"Раскрывай последствия, веди к финальной точке."
+        )
+    elif w.get("boss_defeated"):
+        lines.append("СТАТУС: босс повержен, начинается эпилог")
+    else:
+        lines.append("СТАТУС: основной сюжет")
+
     c = world["character"]
     cls = CLASSES.get(c.get("cls"), {})
     lines.append(
@@ -138,7 +161,6 @@ def build_context(world: dict) -> str:
             desc = f" — {it['desc']}" if it.get("desc") else ""
             lines.append(f"  • {it['name']}{qty_str}{desc}")
 
-    # Факты действий через интерфейс (использование зелий и т.п.)
     recent = world.get("recent_actions") or []
     if recent:
         lines.append("")
