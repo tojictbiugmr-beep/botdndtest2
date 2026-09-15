@@ -12,7 +12,8 @@ def _migrate_personality(p):
     """Старый характер (строка) → dict. Новый dict возвращает как есть."""
     if isinstance(p, dict):
         # Дополняем отсутствующие поля
-        for k in ("archetype", "habits", "manner", "fears", "motivation", "notes"):
+        for k in ("archetype", "habits", "manner", "fears",
+                  "motivation", "conflict", "notes"):
             p.setdefault(k, "")
         return p
     if isinstance(p, str):
@@ -22,6 +23,7 @@ def _migrate_personality(p):
             "manner": "",
             "fears": "",
             "motivation": "",
+            "conflict": "",
             "notes": p,
         }
     return {
@@ -30,6 +32,7 @@ def _migrate_personality(p):
         "manner": "",
         "fears": "",
         "motivation": "",
+        "conflict": "",
         "notes": "",
     }
 
