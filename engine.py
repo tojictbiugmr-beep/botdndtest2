@@ -18,6 +18,20 @@ def _safe_int(value, default: int = 0) -> int:
         return default
 
 
+def _update_epilogue(world: dict):
+    """Обновляет счётчик эпилога. Вызывается один раз за ход."""
+    w = world["world"]
+    if w.get("final_reached"):
+        return
+    if w.get("boss_defeated") and w.get("epilogue_turns", 0) == 0:
+        w["epilogue_turns"] = 5
+        return
+    if w.get("epilogue_turns", 0) > 0:
+        w["epilogue_turns"] -= 1
+        if w["epilogue_turns"] == 0:
+            w["final_reached"] = True
+
+
 async def process_action(world: dict, user_input: str) -> dict:
     ctx = build_context(world)
     data = await ask_master(ctx, world["history"], user_input)
@@ -40,6 +54,7 @@ async def process_action(world: dict, user_input: str) -> dict:
         return {"type": "check", "text": narrative, "check": check}
 
     apply_memory(world, memory)
+    _update_epilogue(world)
 
     if start_c and start_c.get("enemies"):
         start_combat(world, start_c["enemies"])
@@ -62,7 +77,6 @@ async def resolve_check(world: dict) -> dict:
 
     roll = resolve(mod, diff)
 
-    # Подстраховка: если dice.resolve не вернул mod/difficulty — добавим
     roll["difficulty"] = diff
     roll["mod"] = mod
 
@@ -103,6 +117,7 @@ async def resolve_check(world: dict) -> dict:
             new_combat = data.get("start_combat")
 
             apply_memory(world, memory)
+            _update_epilogue(world)
 
             result_text = f"{roll_line}\n\n{narrative}"
             push_history(world, "assistant", result_text)
@@ -122,7 +137,6 @@ async def resolve_check(world: dict) -> dict:
 
             return {"type": "text", "text": result_text, "roll": roll}
 
-        # Fallback, если второй запрос упал
         branch_raw = check.get("success" if roll["success"] else "fail")
         branch = str(branch_raw).strip() if branch_raw else (
             "Тебе удаётся сделать задуманное."
